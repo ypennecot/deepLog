@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and test results
+logs/
+test-results/
+*.log
+
+# Database
+*.db
+*.sqlite
+
+# Playwright
+playwright-report/
+test-results/
+
+# Cursor plans (optional - uncomment if you don't want to track plans)
+# .cursor/plans/
+

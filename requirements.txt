@@ -1,0 +1,10 @@
+# Database
+psycopg2-binary>=2.9.9
+
+# Web Framework
+Flask==3.0.0
+
+# Utilities
+python-dotenv==1.0.0
+pandas==2.1.4
+

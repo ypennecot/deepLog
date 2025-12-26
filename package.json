@@ -1,0 +1,16 @@
+{
+  "name": "deeplog",
+  "version": "1.0.0",
+  "description": "Application pour l'analyse de données de logs provenant de véhicules marins autonomes (USV et AUV).",
+  "main": "test_run_detail.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.57.0"
+  }
+}

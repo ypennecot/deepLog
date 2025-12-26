@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepLog - Visualisation des données</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .filters {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .filter-group label {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        
+        .filter-group select,
+        .filter-group input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            margin-bottom: 20px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        
+        thead {
+            background: #007bff;
+            color: white;
+        }
+        
+        th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .pagination button {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #f8f9fa;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .pagination .page-info {
+            padding: 8px 16px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .vehicle-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .vehicle-usv {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .vehicle-auv {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ddd;
+        }
+        
+        .tab {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            color: #007bff;
+        }
+        
+        .tab.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .multi-select {
+            min-height: 100px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+            background: white;
+        }
+        
+        .multi-select label {
+            display: block;
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+        
+        .multi-select label:hover {
+            background: #f8f9fa;
+        }
+        
+        .multi-select input[type="checkbox"] {
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DeepLog - Visualisation des données</h1>
+        <p class="subtitle">Analyse des logs de navigation USV et AUV</p>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('rows')">Vue en lignes</button>
+            <button class="tab" onclick="switchTab('columns')">Vue en colonnes</button>
+            <button class="tab" onclick="switchTab('runs')">Runs AUV</button>
+        </div>
+        
+        <!-- Stats only shown in rows and columns views -->
+        <div class="stats" id="stats" style="display: block;">
+            <div class="stat-card">
+                <div class="stat-label">Total d'entrées</div>
+                <div class="stat-value" id="stat-total">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Fichiers importés</div>
+                <div class="stat-value" id="stat-files">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">USV</div>
+                <div class="stat-value" id="stat-usv">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">AUV</div>
+                <div class="stat-value" id="stat-auv">-</div>
+            </div>
+        </div>
+        
+        <!-- Vue en lignes (vue originale) -->
+        <div id="rows-view" class="tab-content active">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="vehicle-filter">Type de véhicule</label>
+                    <select id="vehicle-filter">
+                        <option value="">Tous</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="data-type-filter">Type de donnée</label>
+                    <select id="data-type-filter">
+                        <option value="">Tous</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="start-time-filter">Date début</label>
+                    <input type="datetime-local" id="start-time-filter">
+                </div>
+                <div class="filter-group">
+                    <label for="end-time-filter">Date fin</label>
+                    <input type="datetime-local" id="end-time-filter">
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div id="loading" class="loading">Chargement des données...</div>
+                <div id="error" class="error" style="display: none;"></div>
+                <table id="data-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Date/Heure</th>
+                            <th>Véhicule</th>
+                            <th>ID Véhicule</th>
+                            <th>Type de donnée</th>
+                            <th>Valeur</th>
+                            <th>Fichier source</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="pagination" style="display: none;">
+                <button id="prev-page" disabled>Précédent</button>
+                <span class="page-info" id="page-info"></span>
+                <button id="next-page">Suivant</button>
+            </div>
+        </div>
+        
+        <!-- Vue en colonnes (vue pivotée) -->
+        <div id="columns-view" class="tab-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="vehicle-filter-col">Type de véhicule</label>
+                    <select id="vehicle-filter-col">
+                        <option value="">Tous</option>
+                    </select>
+                </div>
+                <div class="filter-group" style="grid-column: span 2;">
+                    <label>Types de données à afficher (sélection multiple)</label>
+                    <div class="multi-select" id="data-types-multi-select">
+                        <div style="text-align: center; padding: 20px; color: #666;">
+                            Chargement des types de données...
+                        </div>
+                    </div>
+                </div>
+                <div class="filter-group">
+                    <label for="start-time-filter-col">Date début</label>
+                    <input type="datetime-local" id="start-time-filter-col">
+                </div>
+                <div class="filter-group">
+                    <label for="end-time-filter-col">Date fin</label>
+                    <input type="datetime-local" id="end-time-filter-col">
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div id="loading-col" class="loading">Chargement des types de données...</div>
+                <div id="error-col" class="error" style="display: none;"></div>
+                <table id="data-table-col" style="display: none;">
+                    <thead id="table-head-col">
+                    </thead>
+                    <tbody id="table-body-col">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="pagination-col" style="display: none;">
+                <button id="prev-page-col" disabled>Précédent</button>
+                <span class="page-info" id="page-info-col"></span>
+                <button id="next-page-col">Suivant</button>
+            </div>
+        </div>
+        
+        <!-- Vue Runs AUV -->
+        <div id="runs-view" class="tab-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="vehicle-filter-runs">Véhicule</label>
+                    <select id="vehicle-filter-runs">
+                        <option value="">Tous</option>
+                        <option value="AUV">AUV</option>
+                        <option value="USV">USV</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="start-time-filter-runs">Date début</label>
+                    <input type="datetime-local" id="start-time-filter-runs">
+                </div>
+                <div class="filter-group">
+                    <label for="end-time-filter-runs">Date fin</label>
+                    <input type="datetime-local" id="end-time-filter-runs">
+                </div>
+            </div>
+            
+            <div class="runs-controls">
+                <button onclick="zoomInRuns()">Zoom +</button>
+                <button onclick="zoomOutRuns()">Zoom -</button>
+                <button onclick="resetZoomRuns()">Réinitialiser</button>
+                <span id="runs-info" style="margin-left: 20px; color: #666;"></span>
+            </div>
+            
+            <div class="runs-chart-container">
+                <canvas id="runs-chart"></canvas>
+            </div>
+            
+            <div class="runs-legend" id="runs-legend"></div>
+        </div>
+    </div>
+    
+    <script>
+        let currentPage = 1;
+        let currentPageCol = 1;
+        const perPage = 100;
+        let totalPages = 1;
+        let totalPagesCol = 1;
+        let selectedDataTypes = [];
+        
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            if (tabName === 'rows') {
+                document.querySelectorAll('.tab')[0].classList.add('active');
+                document.getElementById('rows-view').classList.add('active');
+                document.getElementById('stats').style.display = 'grid';
+            } else if (tabName === 'columns') {
+                document.querySelectorAll('.tab')[1].classList.add('active');
+                document.getElementById('columns-view').classList.add('active');
+                document.getElementById('stats').style.display = 'grid';
+                loadDataTypesForMultiSelect();
+            } else if (tabName === 'runs') {
+                document.querySelectorAll('.tab')[2].classList.add('active');
+                document.getElementById('runs-view').classList.add('active');
+                document.getElementById('stats').style.display = 'none';
+                loadRuns();
+            }
+        }
+        
+        // Load stats
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                
+                document.getElementById('stat-total').textContent = stats.total_entries.toLocaleString();
+                document.getElementById('stat-files').textContent = stats.total_files;
+                document.getElementById('stat-usv').textContent = (stats.by_vehicle.USV || 0).toLocaleString();
+                document.getElementById('stat-auv').textContent = (stats.by_vehicle.AUV || 0).toLocaleString();
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+        
+        // Load vehicle types
+        async function loadVehicleTypes() {
+            try {
+                const response = await fetch('/api/vehicle_types');
+                const types = await response.json();
+                const select = document.getElementById('vehicle-filter');
+                types.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type;
+                    option.textContent = type;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading vehicle types:', error);
+            }
+        }
+        
+        // Load data types
+        async function loadDataTypes(vehicleType = '') {
+            try {
+                const url = vehicleType ? `/api/data_types?vehicle_type=${vehicleType}` : '/api/data_types';
+                const response = await fetch(url);
+                const types = await response.json();
+                const select = document.getElementById('data-type-filter');
+                select.innerHTML = '<option value="">Tous</option>';
+                types.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type;
+                    option.textContent = type;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading data types:', error);
+            }
+        }
+        
+        // Load log entries
+        async function loadLogEntries() {
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const table = document.getElementById('data-table');
+            const tbody = document.getElementById('table-body');
+            
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            table.style.display = 'none';
+            
+            try {
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    per_page: perPage
+                });
+                
+                const vehicleType = document.getElementById('vehicle-filter').value;
+                if (vehicleType) params.append('vehicle_type', vehicleType);
+                
+                const dataType = document.getElementById('data-type-filter').value;
+                if (dataType) params.append('data_type', dataType);
+                
+                const startTime = document.getElementById('start-time-filter').value;
+                if (startTime) params.append('start_time', startTime);
+                
+                const endTime = document.getElementById('end-time-filter').value;
+                if (endTime) params.append('end_time', endTime);
+                
+                const response = await fetch(`/api/log_entries?${params}`);
+                const data = await response.json();
+                
+                totalPages = data.pages;
+                
+                tbody.innerHTML = '';
+                data.entries.forEach(entry => {
+                    const row = document.createElement('tr');
+                    const vehicleClass = entry.vehicle_type === 'USV' ? 'vehicle-usv' : 'vehicle-auv';
+                    // Format date with milliseconds - parse ISO format timestamp
+                    let fullDate;
+                    if (entry.time) {
+                        // Parse ISO format timestamp (e.g., "2025-11-23T14:04:54.117417+01:00")
+                        const date = new Date(entry.time);
+                        
+                        // Extract milliseconds from ISO string if available
+                        let ms = '000';
+                        if (entry.time.includes('.')) {
+                            // Extract fractional seconds from ISO string
+                            const fractionalMatch = entry.time.match(/\.(\d+)/);
+                            if (fractionalMatch) {
+                                const fractional = fractionalMatch[1];
+                                // Take first 3 digits for milliseconds
+                                ms = fractional.substring(0, 3).padEnd(3, '0');
+                            }
+                        } else {
+                            // Fallback to getMilliseconds() if no fractional part in string
+                            ms = date.getMilliseconds().toString().padStart(3, '0');
+                        }
+                        
+                        const dateStr = date.toLocaleString('fr-FR', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        });
+                        fullDate = `${dateStr}.${ms}`;
+                    } else {
+                        fullDate = '-';
+                    }
+                    
+                    row.innerHTML = `
+                        <td>${fullDate}</td>
+                        <td><span class="vehicle-badge ${vehicleClass}">${entry.vehicle_type}</span></td>
+                        <td>${entry.vehicle_id || '-'}</td>
+                        <td>${entry.data_type}</td>
+                        <td>${parseFloat(entry.value).toLocaleString('fr-FR', {maximumFractionDigits: 6})}</td>
+                        <td>${entry.source_filename}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                document.getElementById('pagination').style.display = 'flex';
+                updatePagination();
+                
+            } catch (err) {
+                loading.style.display = 'none';
+                error.style.display = 'block';
+                error.textContent = `Erreur: ${err.message}`;
+            }
+        }
+        
+        function updatePagination() {
+            document.getElementById('page-info').textContent = 
+                `Page ${currentPage} sur ${totalPages}`;
+            document.getElementById('prev-page').disabled = currentPage === 1;
+            document.getElementById('next-page').disabled = currentPage >= totalPages;
+        }
+        
+        // Event listeners
+        document.getElementById('prev-page').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                loadLogEntries();
+            }
+        });
+        
+        document.getElementById('next-page').addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++;
+                loadLogEntries();
+            }
+        });
+        
+        document.getElementById('vehicle-filter').addEventListener('change', (e) => {
+            currentPage = 1;
+            loadDataTypes(e.target.value);
+            loadLogEntries();
+        });
+        
+        document.getElementById('data-type-filter').addEventListener('change', () => {
+            currentPage = 1;
+            loadLogEntries();
+        });
+        
+        document.getElementById('start-time-filter').addEventListener('change', () => {
+            currentPage = 1;
+            loadLogEntries();
+        });
+        
+        document.getElementById('end-time-filter').addEventListener('change', () => {
+            currentPage = 1;
+            loadLogEntries();
+        });
+        
+        // Load data types for multi-select (columns view)
+        async function loadDataTypesForMultiSelect() {
+            try {
+                const vehicleType = document.getElementById('vehicle-filter-col').value;
+                const url = vehicleType ? `/api/data_types?vehicle_type=${vehicleType}` : '/api/data_types';
+                const response = await fetch(url);
+                const types = await response.json();
+                const container = document.getElementById('data-types-multi-select');
+                container.innerHTML = '';
+                
+                // Select all by default
+                selectedDataTypes = types;
+                
+                types.forEach(type => {
+                    const label = document.createElement('label');
+                    label.innerHTML = `<input type="checkbox" value="${type}" checked onchange="updateSelectedDataTypes()"> ${type}`;
+                    container.appendChild(label);
+                });
+                
+                // Auto-load with all data types selected
+                if (types.length > 0) {
+                    currentPageCol = 1;
+                    loadLogEntriesPivoted();
+                }
+            } catch (error) {
+                console.error('Error loading data types:', error);
+            }
+        }
+        
+        function updateSelectedDataTypes() {
+            const checkboxes = document.querySelectorAll('#data-types-multi-select input[type="checkbox"]:checked');
+            selectedDataTypes = Array.from(checkboxes).map(cb => cb.value);
+        }
+        
+        // Load pivoted log entries (columns view)
+        async function loadLogEntriesPivoted() {
+            if (selectedDataTypes.length === 0) {
+                document.getElementById('loading-col').textContent = 'Sélectionnez au moins un type de donnée';
+                return;
+            }
+            
+            const loading = document.getElementById('loading-col');
+            const error = document.getElementById('error-col');
+            const table = document.getElementById('data-table-col');
+            const thead = document.getElementById('table-head-col');
+            const tbody = document.getElementById('table-body-col');
+            
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            table.style.display = 'none';
+            
+            try {
+                const params = new URLSearchParams({
+                    page: currentPageCol,
+                    per_page: perPage
+                });
+                
+                selectedDataTypes.forEach(dt => params.append('data_types', dt));
+                
+                const vehicleType = document.getElementById('vehicle-filter-col').value;
+                if (vehicleType) params.append('vehicle_type', vehicleType);
+                
+                const startTime = document.getElementById('start-time-filter-col').value;
+                if (startTime) params.append('start_time', startTime);
+                
+                const endTime = document.getElementById('end-time-filter-col').value;
+                if (endTime) params.append('end_time', endTime);
+                
+                const response = await fetch(`/api/log_entries_pivoted?${params}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                totalPagesCol = data.pages;
+                
+                // Build table header with selected data types as columns
+                const headerRow = document.createElement('tr');
+                headerRow.innerHTML = '<th>Date/Heure</th><th>Véhicule</th><th>ID Véhicule</th>';
+                selectedDataTypes.forEach(dt => {
+                    const th = document.createElement('th');
+                    th.textContent = dt;
+                    headerRow.appendChild(th);
+                });
+                thead.innerHTML = '';
+                thead.appendChild(headerRow);
+                
+                // Build table body
+                tbody.innerHTML = '';
+                data.entries.forEach(entry => {
+                    const row = document.createElement('tr');
+                    const vehicleClass = entry.vehicle_type === 'USV' ? 'vehicle-usv' : 'vehicle-auv';
+                    
+                    // Format date with milliseconds - parse ISO format timestamp
+                    let fullDate;
+                    if (entry.time) {
+                        // Parse ISO format timestamp (e.g., "2025-11-23T14:04:54.117417+01:00")
+                        const date = new Date(entry.time);
+                        
+                        // Extract milliseconds from ISO string if available
+                        let ms = '000';
+                        if (entry.time.includes('.')) {
+                            // Extract fractional seconds from ISO string
+                            const fractionalMatch = entry.time.match(/\.(\d+)/);
+                            if (fractionalMatch) {
+                                const fractional = fractionalMatch[1];
+                                // Take first 3 digits for milliseconds
+                                ms = fractional.substring(0, 3).padEnd(3, '0');
+                            }
+                        } else {
+                            // Fallback to getMilliseconds() if no fractional part in string
+                            ms = date.getMilliseconds().toString().padStart(3, '0');
+                        }
+                        
+                        const dateStr = date.toLocaleString('fr-FR', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        });
+                        fullDate = `${dateStr}.${ms}`;
+                    } else {
+                        fullDate = '-';
+                    }
+                    
+                    // Create cells in order to ensure alignment
+                    const timeCell = document.createElement('td');
+                    timeCell.textContent = fullDate;
+                    row.appendChild(timeCell);
+                    
+                    const vehicleCell = document.createElement('td');
+                    const badge = document.createElement('span');
+                    badge.className = `vehicle-badge ${vehicleClass}`;
+                    badge.textContent = entry.vehicle_type;
+                    vehicleCell.appendChild(badge);
+                    row.appendChild(vehicleCell);
+                    
+                    const vehicleIdCell = document.createElement('td');
+                    vehicleIdCell.textContent = entry.vehicle_id || '-';
+                    row.appendChild(vehicleIdCell);
+                    
+                    // Add value for each selected data type in the same order as header
+                    selectedDataTypes.forEach(dt => {
+                        const cell = document.createElement('td');
+                        const value = entry[dt];
+                        if (value !== null && value !== undefined) {
+                            cell.textContent = parseFloat(value).toLocaleString('fr-FR', {maximumFractionDigits: 6});
+                        } else {
+                            cell.textContent = '-';
+                        }
+                        row.appendChild(cell);
+                    });
+                    
+                    tbody.appendChild(row);
+                });
+                
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                document.getElementById('pagination-col').style.display = 'flex';
+                updatePaginationCol();
+                
+            } catch (err) {
+                loading.style.display = 'none';
+                error.style.display = 'block';
+                error.textContent = `Erreur: ${err.message}`;
+            }
+        }
+        
+        function updatePaginationCol() {
+            document.getElementById('page-info-col').textContent = 
+                `Page ${currentPageCol} sur ${totalPagesCol}`;
+            document.getElementById('prev-page-col').disabled = currentPageCol === 1;
+            document.getElementById('next-page-col').disabled = currentPageCol >= totalPagesCol;
+        }
+        
+        // Event listeners for columns view
+        document.getElementById('prev-page-col').addEventListener('click', () => {
+            if (currentPageCol > 1) {
+                currentPageCol--;
+                loadLogEntriesPivoted();
+            }
+        });
+        
+        document.getElementById('next-page-col').addEventListener('click', () => {
+            if (currentPageCol < totalPagesCol) {
+                currentPageCol++;
+                loadLogEntriesPivoted();
+            }
+        });
+        
+        document.getElementById('vehicle-filter-col').addEventListener('change', (e) => {
+            currentPageCol = 1;
+            loadDataTypesForMultiSelect();
+        });
+        
+        document.getElementById('start-time-filter-col').addEventListener('change', () => {
+            currentPageCol = 1;
+            if (selectedDataTypes.length > 0) loadLogEntriesPivoted();
+        });
+        
+        document.getElementById('end-time-filter-col').addEventListener('change', () => {
+            currentPageCol = 1;
+            if (selectedDataTypes.length > 0) loadLogEntriesPivoted();
+        });
+        
+        // Auto-load when data types are selected
+        function updateSelectedDataTypes() {
+            const checkboxes = document.querySelectorAll('#data-types-multi-select input[type="checkbox"]:checked');
+            selectedDataTypes = Array.from(checkboxes).map(cb => cb.value);
+            if (selectedDataTypes.length > 0) {
+                currentPageCol = 1;
+                loadLogEntriesPivoted();
+            } else {
+                document.getElementById('loading-col').textContent = 'Sélectionnez au moins un type de donnée';
+                document.getElementById('data-table-col').style.display = 'none';
+                document.getElementById('pagination-col').style.display = 'none';
+            }
+        }
+        
+        // Runs chart
+        let runsData = [];
+        let runsTimeRange = { min: null, max: null };
+        let runsZoomLevel = 1;
+        let runsPanOffset = 0;
+        let runsDepthCache = {}; // Cache for depth data by log_file_id
+        
+        async function loadRuns() {
+            try {
+                const vehicleType = document.getElementById('vehicle-filter-runs').value;
+                const startTime = document.getElementById('start-time-filter-runs').value;
+                const endTime = document.getElementById('end-time-filter-runs').value;
+                
+                const params = new URLSearchParams();
+                if (vehicleType) params.append('vehicle_type', vehicleType);
+                if (startTime) params.append('start_time', startTime);
+                if (endTime) params.append('end_time', endTime);
+                
+                const response = await fetch(`/api/runs?${params}`);
+                runsData = await response.json();
+                
+                if (runsData.length > 0) {
+                    // Calculate time range
+                    runsTimeRange.min = Math.min(...runsData.map(r => new Date(r.first_timestamp).getTime()));
+                    runsTimeRange.max = Math.max(...runsData.map(r => new Date(r.last_timestamp).getTime()));
+                }
+                
+                runsZoomLevel = 1;
+                runsPanOffset = 0;
+                
+                // Pre-load depth data for all AUV runs
+                await loadDepthDataForRuns();
+                
+                updateRunsChart();
+            } catch (error) {
+                console.error('Error loading runs:', error);
+            }
+        }
+        
+        // Pre-load depth data for all AUV runs
+        async function loadDepthDataForRuns() {
+            const auvRuns = runsData.filter(r => r.vehicle_type === 'AUV' && r.id);
+            const promises = auvRuns.map(async (run) => {
+                if (!runsDepthCache[run.id]) {
+                    try {
+                        const response = await fetch(`/api/run_depth?log_file_id=${run.id}`);
+                        const depthData = await response.json();
+                        runsDepthCache[run.id] = depthData;
+                    } catch (error) {
+                        console.error(`Error loading depth for run ${run.id}:`, error);
+                        runsDepthCache[run.id] = []; // Empty array to avoid retrying
+                    }
+                }
+            });
+            await Promise.all(promises);
+        }
+        
+        // Draw depth graph inside AUV run bar (synchronous version using cached data)
+        function drawDepthGraphSync(ctx, depthData, x, y, width, height, runStart, runEnd, visibleStart, visibleEnd) {
+            if (!depthData || depthData.length === 0) return;
+            
+            // Filter depth data to visible time range
+            const filteredData = depthData.filter(d => {
+                const time = new Date(d.time).getTime();
+                return time >= Math.max(runStart, visibleStart) && time <= Math.min(runEnd, visibleEnd);
+            });
+            
+            if (filteredData.length === 0) return;
+            
+            // Depth range: 0m (top) to 100m (bottom)
+            const maxDepth = 100;
+            const minDepth = 0;
+            
+            // Draw depth curve
+            ctx.strokeStyle = '#ffeb3b'; // Yellow color for depth line
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            let firstPoint = true;
+            filteredData.forEach((point) => {
+                const time = new Date(point.time).getTime();
+                const depth = Math.abs(point.depth || 0); // Use absolute value for depth
+                
+                // Calculate X position within the bar
+                const timeRatio = (time - Math.max(runStart, visibleStart)) / (Math.min(runEnd, visibleEnd) - Math.max(runStart, visibleStart));
+                const pointX = x + (timeRatio * width);
+                
+                // Calculate Y position (0m at top, 100m at bottom, inverted)
+                // Clamp depth to 0-100m range
+                const clampedDepth = Math.min(maxDepth, Math.max(minDepth, depth));
+                const depthRatio = clampedDepth / maxDepth;
+                const pointY = y + (depthRatio * height);
+                
+                if (firstPoint) {
+                    ctx.moveTo(pointX, pointY);
+                    firstPoint = false;
+                } else {
+                    ctx.lineTo(pointX, pointY);
+                }
+            });
+            
+            ctx.stroke();
+            
+            // Optional: Fill area under curve with semi-transparent color
+            if (filteredData.length > 0) {
+                const lastPoint = filteredData[filteredData.length - 1];
+                const lastTime = new Date(lastPoint.time).getTime();
+                const lastTimeRatio = (lastTime - Math.max(runStart, visibleStart)) / (Math.min(runEnd, visibleEnd) - Math.max(runStart, visibleStart));
+                const lastX = x + (lastTimeRatio * width);
+                
+                ctx.lineTo(lastX, y + height); // Bottom right
+                ctx.lineTo(x, y + height); // Bottom left
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(255, 235, 59, 0.2)'; // Semi-transparent yellow
+                ctx.fill();
+            }
+        }
+        
+        function updateRunsChart() {
+            const canvas = document.getElementById('runs-chart');
+            const ctx = canvas.getContext('2d');
+            const container = canvas.parentElement;
+            
+            // Set canvas size
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (runsData.length === 0) {
+                ctx.fillStyle = '#666';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Aucun run trouvé', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+            
+            // Group runs by vehicle_id
+            const runsByVehicle = {};
+            runsData.forEach(run => {
+                const vehicleId = run.vehicle_id || 'Unknown';
+                if (!runsByVehicle[vehicleId]) {
+                    runsByVehicle[vehicleId] = [];
+                }
+                runsByVehicle[vehicleId].push(run);
+            });
+            
+            const vehicleIds = Object.keys(runsByVehicle).sort();
+            const colors = ['#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6f42c1'];
+            
+            // Calculate dimensions - FIXED values that don't change with zoom
+            const padding = { top: 40, right: 100, bottom: 60, left: 150 };
+            const chartWidth = canvas.width - padding.left - padding.right;
+            
+            // Fixed row height - doesn't change with zoom (Y axis stays constant)
+            const minRowHeight = 40;
+            const maxRowHeight = 60;
+            const availableHeight = canvas.height - padding.top - padding.bottom;
+            const calculatedRowHeight = availableHeight / Math.max(vehicleIds.length, 1);
+            const rowHeight = Math.max(minRowHeight, Math.min(maxRowHeight, calculatedRowHeight));
+            
+            // Calculate FIXED chart height based on number of vehicles (doesn't change with zoom)
+            const chartHeight = Math.max(vehicleIds.length * rowHeight, 200);
+            
+            // FIXED Y position for time axis (bottom of chart area) - never changes with zoom
+            const timeAxisY = padding.top + chartHeight;
+            
+            // Calculate visible time range with zoom and pan (only affects X axis)
+            const timeSpan = runsTimeRange.max - runsTimeRange.min;
+            const visibleTimeSpan = timeSpan / runsZoomLevel;
+            const visibleStart = runsTimeRange.min + runsPanOffset;
+            const visibleEnd = visibleStart + visibleTimeSpan;
+            
+            // Ensure pan offset stays within bounds
+            const maxPanOffset = timeSpan - visibleTimeSpan;
+            runsPanOffset = Math.max(0, Math.min(runsPanOffset, maxPanOffset));
+            
+            // Draw time axis - FIXED Y position (never changes with zoom)
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            // Vertical axis (left)
+            ctx.moveTo(padding.left, padding.top);
+            ctx.lineTo(padding.left, timeAxisY);
+            // Horizontal axis (bottom) - FIXED Y position
+            ctx.moveTo(padding.left, timeAxisY);
+            ctx.lineTo(padding.left + chartWidth, timeAxisY);
+            ctx.stroke();
+            
+            // Draw time labels - FIXED Y position (never changes with zoom)
+            ctx.fillStyle = '#333';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            const numTicks = 10;
+            const labelY = timeAxisY + 20; // Fixed offset below axis
+            const tickLength = 5;
+            for (let i = 0; i <= numTicks; i++) {
+                const time = visibleStart + (visibleEnd - visibleStart) * (i / numTicks);
+                const x = padding.left + (chartWidth * i / numTicks);
+                const date = new Date(time);
+                const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                // Draw label at fixed Y position
+                ctx.fillText(timeStr, x, labelY);
+                // Draw tick mark at fixed Y position
+                ctx.beginPath();
+                ctx.moveTo(x, timeAxisY);
+                ctx.lineTo(x, timeAxisY + tickLength);
+                ctx.stroke();
+            }
+            
+            // Draw vehicle labels and bars
+            // Use fixed positioning for Y axis - doesn't change with zoom
+            vehicleIds.forEach((vehicleId, vehicleIdx) => {
+                // Fixed Y position based on row index, not affected by zoom
+                const y = padding.top + (vehicleIdx * rowHeight) + (rowHeight / 2);
+                const color = colors[vehicleIdx % colors.length];
+                
+                // Vehicle label
+                ctx.fillStyle = '#333';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(vehicleId, padding.left - 10, y + 5);
+                
+                // Draw runs for this vehicle
+                const runs = runsByVehicle[vehicleId];
+                runs.forEach(run => {
+                    const start = new Date(run.first_timestamp).getTime();
+                    const end = new Date(run.last_timestamp).getTime();
+                    
+                    // Check if run is visible
+                    if (end < visibleStart || start > visibleEnd) return;
+                    
+                    // Calculate bar position
+                    const barStart = Math.max(start, visibleStart);
+                    const barEnd = Math.min(end, visibleEnd);
+                    const x1 = padding.left + ((barStart - visibleStart) / (visibleEnd - visibleStart)) * chartWidth;
+                    const x2 = padding.left + ((barEnd - visibleStart) / (visibleEnd - visibleStart)) * chartWidth;
+                    const barWidth = Math.max(2, x2 - x1);
+                    
+                    const barY = y - rowHeight / 2 + 2;
+                    const barHeight = rowHeight - 4;
+                    
+                    // Draw bar background
+                    ctx.fillStyle = color;
+                    ctx.fillRect(x1, barY, barWidth, barHeight);
+                    
+                    // Draw border
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x1, barY, barWidth, barHeight);
+                    
+                    // Draw depth graph for AUV runs (synchronous, using cached data)
+                    if (run.vehicle_type === 'AUV' && run.id && barWidth > 10 && runsDepthCache[run.id]) {
+                        drawDepthGraphSync(ctx, runsDepthCache[run.id], x1, barY, barWidth, barHeight, start, end, visibleStart, visibleEnd);
+                    }
+                });
+            });
+            
+            // Store AUV run bars for click detection (outside the loop to avoid multiple listeners)
+            const auvRunBars = [];
+            vehicleIds.forEach((vehicleId, vehicleIdx) => {
+                const runs = runsByVehicle[vehicleId];
+                runs.forEach(run => {
+                    if (run.vehicle_type === 'AUV' && run.id) {
+                        const start = new Date(run.first_timestamp).getTime();
+                        const end = new Date(run.last_timestamp).getTime();
+                        
+                        if (end >= visibleStart && start <= visibleEnd) {
+                            const barStart = Math.max(start, visibleStart);
+                            const barEnd = Math.min(end, visibleEnd);
+                            const x1 = padding.left + ((barStart - visibleStart) / (visibleEnd - visibleStart)) * chartWidth;
+                            const x2 = padding.left + ((barEnd - visibleStart) / (visibleEnd - visibleStart)) * chartWidth;
+                            const y = padding.top + (vehicleIdx * rowHeight) + (rowHeight / 2);
+                            const barY = y - rowHeight / 2 + 2;
+                            const barHeight = rowHeight - 4;
+                            
+                            auvRunBars.push({
+                                id: run.id,
+                                x1: x1,
+                                x2: x2,
+                                y: barY,
+                                height: barHeight
+                            });
+                        }
+                    }
+                });
+            });
+            
+            // Add single click handler for all AUV bars
+            const runsCanvas = document.getElementById('runs-chart');
+            runsCanvas.onclick = (e) => {
+                const rect = runsCanvas.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                
+                // Find which bar was clicked
+                for (const bar of auvRunBars) {
+                    if (clickX >= bar.x1 && clickX <= bar.x2 && 
+                        clickY >= bar.y && clickY <= bar.y + bar.height) {
+                        window.location.href = `/run/${bar.id}`;
+                        return;
+                    }
+                }
+            };
+            
+            // Update info
+            document.getElementById('runs-info').textContent = 
+                `${runsData.length} run(s) affiché(s) | Zoom: ${runsZoomLevel.toFixed(2)}x`;
+            
+            // Update legend
+            const legend = document.getElementById('runs-legend');
+            legend.innerHTML = '<strong>Légende:</strong> ';
+            vehicleIds.forEach((vehicleId, idx) => {
+                const item = document.createElement('span');
+                item.className = 'runs-legend-item';
+                item.innerHTML = `<span class="runs-legend-color" style="background: ${colors[idx % colors.length]}"></span>${vehicleId}`;
+                legend.appendChild(item);
+            });
+        }
+        
+        function zoomInRuns() {
+            // Zoom only affects X axis (time), Y axis stays fixed
+            runsZoomLevel = Math.min(runsZoomLevel * 1.5, 100);
+            // Adjust pan offset to keep center point stable
+            const timeSpan = runsTimeRange.max - runsTimeRange.min;
+            const oldVisibleSpan = timeSpan / (runsZoomLevel / 1.5);
+            const newVisibleSpan = timeSpan / runsZoomLevel;
+            const center = runsTimeRange.min + runsPanOffset + (oldVisibleSpan / 2);
+            runsPanOffset = Math.max(0, Math.min(center - (newVisibleSpan / 2) - runsTimeRange.min, timeSpan - newVisibleSpan));
+            updateRunsChart();
+        }
+        
+        function zoomOutRuns() {
+            // Zoom only affects X axis (time), Y axis stays fixed
+            runsZoomLevel = Math.max(runsZoomLevel / 1.5, 1);
+            // Adjust pan offset to keep center point stable
+            const timeSpan = runsTimeRange.max - runsTimeRange.min;
+            const oldVisibleSpan = timeSpan / (runsZoomLevel * 1.5);
+            const newVisibleSpan = timeSpan / runsZoomLevel;
+            const center = runsTimeRange.min + runsPanOffset + (oldVisibleSpan / 2);
+            runsPanOffset = Math.max(0, Math.min(center - (newVisibleSpan / 2) - runsTimeRange.min, timeSpan - newVisibleSpan));
+            updateRunsChart();
+        }
+        
+        function resetZoomRuns() {
+            runsZoomLevel = 1;
+            runsPanOffset = 0;
+            updateRunsChart();
+        }
+        
+        // Draw depth graph inside AUV run bar (synchronous version using cached data)
+        function drawDepthGraphSync(ctx, depthData, x, y, width, height, runStart, runEnd, visibleStart, visibleEnd) {
+            if (!depthData || depthData.length === 0) return;
+            
+            // Filter depth data to visible time range
+            const filteredData = depthData.filter(d => {
+                const time = new Date(d.time).getTime();
+                return time >= Math.max(runStart, visibleStart) && time <= Math.min(runEnd, visibleEnd);
+            });
+            
+            if (filteredData.length === 0) return;
+            
+            // Depth range: 0m (top) to 100m (bottom)
+            const maxDepth = 100;
+            const minDepth = 0;
+            
+            // Draw depth curve
+            ctx.strokeStyle = '#ffeb3b'; // Yellow color for depth line
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            let firstPoint = true;
+            filteredData.forEach((point) => {
+                const time = new Date(point.time).getTime();
+                const depth = point.depth || 0;
+                
+                // Calculate X position within the bar
+                const timeRatio = (time - Math.max(runStart, visibleStart)) / (Math.min(runEnd, visibleEnd) - Math.max(runStart, visibleStart));
+                const pointX = x + (timeRatio * width);
+                
+                // Calculate Y position (0m at top, 100m at bottom, inverted)
+                const depthRatio = Math.min(1, Math.max(0, (depth - minDepth) / (maxDepth - minDepth)));
+                const pointY = y + (depthRatio * height);
+                
+                if (firstPoint) {
+                    ctx.moveTo(pointX, pointY);
+                    firstPoint = false;
+                } else {
+                    ctx.lineTo(pointX, pointY);
+                }
+            });
+            
+            ctx.stroke();
+            
+            // Optional: Fill area under curve with semi-transparent color
+            if (filteredData.length > 0) {
+                const lastPoint = filteredData[filteredData.length - 1];
+                const lastTime = new Date(lastPoint.time).getTime();
+                const lastTimeRatio = (lastTime - Math.max(runStart, visibleStart)) / (Math.min(runEnd, visibleEnd) - Math.max(runStart, visibleStart));
+                const lastX = x + (lastTimeRatio * width);
+                
+                ctx.lineTo(lastX, y + height); // Bottom right
+                ctx.lineTo(x, y + height); // Bottom left
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(255, 235, 59, 0.2)'; // Semi-transparent yellow
+                ctx.fill();
+            }
+        }
+        
+        // Handle canvas mouse events for panning
+        let isPanning = false;
+        let panStartX = 0;
+        const runsCanvas = document.getElementById('runs-chart');
+        
+        runsCanvas.addEventListener('mousedown', (e) => {
+            isPanning = true;
+            panStartX = e.offsetX;
+        });
+        
+        runsCanvas.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                const deltaX = e.offsetX - panStartX;
+                const timeSpan = runsTimeRange.max - runsTimeRange.min;
+                const visibleTimeSpan = timeSpan / runsZoomLevel;
+                const padding = 150; // left padding
+                const chartWidth = runsCanvas.width - padding - 100; // right padding
+                const pixelToTime = visibleTimeSpan / chartWidth;
+                runsPanOffset -= deltaX * pixelToTime;
+                // Keep pan within bounds
+                const maxPanOffset = Math.max(0, timeSpan - visibleTimeSpan);
+                runsPanOffset = Math.max(0, Math.min(runsPanOffset, maxPanOffset));
+                panStartX = e.offsetX;
+                updateRunsChart();
+            }
+        });
+        
+        runsCanvas.addEventListener('mouseup', () => {
+            isPanning = false;
+        });
+        
+        runsCanvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            // Zoom only affects X axis (time), Y axis stays fixed
+            const delta = e.deltaY > 0 ? 1.2 : 0.8;
+            const oldZoom = runsZoomLevel;
+            runsZoomLevel = Math.max(1, Math.min(runsZoomLevel * delta, 100));
+            
+            // Adjust pan offset to zoom around mouse position
+            if (runsZoomLevel !== oldZoom) {
+                const timeSpan = runsTimeRange.max - runsTimeRange.min;
+                const padding = 150;
+                const chartWidth = runsCanvas.width - padding - 100;
+                const mouseX = e.offsetX - padding;
+                const mouseTimeRatio = mouseX / chartWidth;
+                
+                const oldVisibleSpan = timeSpan / oldZoom;
+                const newVisibleSpan = timeSpan / runsZoomLevel;
+                const oldStart = runsTimeRange.min + runsPanOffset;
+                const mouseTime = oldStart + (oldVisibleSpan * mouseTimeRatio);
+                
+                runsPanOffset = mouseTime - (newVisibleSpan * mouseTimeRatio) - runsTimeRange.min;
+                runsPanOffset = Math.max(0, Math.min(runsPanOffset, timeSpan - newVisibleSpan));
+            }
+            
+            updateRunsChart();
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (runsData.length > 0) {
+                updateRunsChart();
+            }
+        });
+        
+        // Event listeners for runs view
+        document.getElementById('vehicle-filter-runs').addEventListener('change', loadRuns);
+        document.getElementById('start-time-filter-runs').addEventListener('change', loadRuns);
+        document.getElementById('end-time-filter-runs').addEventListener('change', loadRuns);
+        
+        // Initialize
+        loadStats();
+        loadVehicleTypes();
+        loadDataTypes();
+        loadLogEntries();
+        
+        // Load vehicle types for columns view
+        async function loadVehicleTypesCol() {
+            try {
+                const response = await fetch('/api/vehicle_types');
+                const types = await response.json();
+                const select = document.getElementById('vehicle-filter-col');
+                types.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type;
+                    option.textContent = type;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading vehicle types:', error);
+            }
+        }
+        loadVehicleTypesCol();
+    </script>
+</body>
+</html>
+
+
+

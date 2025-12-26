@@ -1,0 +1,2627 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détail du Run - {{ run.filename }}</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .header-info {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .back-link {
+            display: inline-block;
+            margin-bottom: 15px;
+            color: #007bff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .time-range-header {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+        }
+        
+        .time-range-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+        }
+        
+        .time-range-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .time-range-value {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            color: #007bff;
+            background: #e7f3ff;
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+        
+        .time-range-separator {
+            color: #6c757d;
+            font-weight: 600;
+        }
+        
+        .time-range-duration {
+            color: #6c757d;
+            font-size: 14px;
+            margin-left: 5px;
+        }
+        
+        .time-range-duration span {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .left-column {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .panel {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .altitude-controls {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .altitude-controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .altitude-controls input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .altitude-color-indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        
+        .motor-controls {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .motor-controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .motor-controls input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .motor-color-indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        
+        #depth-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 400px;
+        }
+        
+        #depth-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
+        #motors-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #motors-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
+        #derived-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #derived-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
+        #state-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #state-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
+        .derived-controls {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .derived-controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .derived-controls input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .derived-color-indicator {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        
+        #map {
+            flex: 1;
+            min-height: 400px;
+            border-radius: 4px;
+        }
+        
+        .cursor-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #dc3545;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .time-display {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #333;
+            z-index: 11;
+        }
+        
+        .time-range-display {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 123, 255, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 11;
+            display: none;
+        }
+        
+        .time-range-display.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-link">← Retour à l'accueil</a>
+    
+    <div class="header">
+        <h1>Run: {{ run.filename }}</h1>
+        <div class="header-info">
+            <strong>Véhicule:</strong> {{ run.vehicle_type }} {{ run.vehicle_id }} | 
+            <strong>Période:</strong> {{ run.first_timestamp }} - {{ run.last_timestamp }} | 
+            <strong>Entrées:</strong> {{ run.row_count }}
+        </div>
+    </div>
+    
+    <div class="time-range-header">
+        <div class="time-range-info">
+            <span class="time-range-label">Plage de temps affichée :</span>
+            <span id="time-range-start" class="time-range-value">--:--:--</span>
+            <span class="time-range-separator">→</span>
+            <span id="time-range-end" class="time-range-value">--:--:--</span>
+            <span class="time-range-duration">(<span id="time-range-duration">--</span>)</span>
+        </div>
+    </div>
+    
+    <div class="content">
+        <div class="left-column">
+            <div class="panel">
+                <h2>Profondeur AUV</h2>
+                <div class="depth-mode-controls">
+                    <label>
+                        <input type="radio" name="depth-mode" value="depth-only" checked>
+                        Profondeur seulement
+                    </label>
+                    <label>
+                        <input type="radio" name="depth-mode" value="altitudes-only">
+                        Altitudes seulement
+                    </label>
+                    <label>
+                        <input type="radio" name="depth-mode" value="depth-minus-altitudes">
+                        Profondeur - Altitudes
+                    </label>
+                </div>
+                <div id="depth-chart-container">
+                    <canvas id="depth-chart"></canvas>
+                    <div class="cursor-line" id="cursor-line" style="display: none;"></div>
+                    <div class="time-display" id="time-display"></div>
+                    <div class="time-range-display" id="time-range-display"></div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h2>Moteurs (M1-M8)</h2>
+                <div class="motor-controls">
+                    <label>
+                        <input type="checkbox" id="show-m1" checked>
+                        <span class="motor-color-indicator" style="background: #007bff;"></span>
+                        M1
+                    </label>
+                    <label>
+                        <input type="checkbox" id="show-m2" checked>
+                        <span class="motor-color-indicator" style="background: #28a745;"></span>
+                        M2
+                    </label>
+                    <label>
+                        <input type="checkbox" id="show-m3" checked>
+                        <span class="motor-color-indicator" style="background: #dc3545;"></span>
+                        M3
+                    </label>
+                    <label>
+                        <input type="checkbox" id="show-m4" checked>
+                        <span class="motor-color-indicator" style="background: #ffc107;"></span>
+                        M4
+                    </label>
+                    <label>
+                        <input type="checkbox" id="show-m5" checked>
+                        <span class="motor-color-indicator" style="background: #17a2b8;"></span>
+                        M5
+                    </label>
+                    <label>
+                        <input type="checkbox" id="show-m6" checked>
+                        <span class="motor-color-indicator" style="background: #6f42c1;"></span>
+                        M6
+                    </label>
+                    <label>
+                        <input type="checkbox" id="show-m7" checked>
+                        <span class="motor-color-indicator" style="background: #fd7e14;"></span>
+                        M7
+                    </label>
+                    <label>
+                        <input type="checkbox" id="show-m8" checked>
+                        <span class="motor-color-indicator" style="background: #20c997;"></span>
+                        M8
+                    </label>
+                </div>
+                <div id="motors-chart-container">
+                    <canvas id="motors-chart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Position USV</h2>
+            <div id="map"></div>
+        </div>
+        
+        <div class="panel">
+            <h2>Avant / Yaw / Up</h2>
+            <div class="derived-controls">
+                <label>
+                    <input type="checkbox" id="show-avant" checked>
+                    <span class="derived-color-indicator" style="background: #007bff;"></span>
+                    Avant
+                </label>
+                <label>
+                    <input type="checkbox" id="show-yaw" checked>
+                    <span class="derived-color-indicator" style="background: #28a745;"></span>
+                    Yaw
+                </label>
+                <label>
+                    <input type="checkbox" id="show-up" checked>
+                    <span class="derived-color-indicator" style="background: #dc3545;"></span>
+                    Up
+                </label>
+            </div>
+            <div id="derived-chart-container">
+                <canvas id="derived-chart"></canvas>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>État AUV (StateNb)</h2>
+            <div id="state-chart-container">
+                <canvas id="state-chart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Run data
+        const runId = {{ run.id }};
+        const runStartTime = new Date('{{ run.first_timestamp }}');
+        const runEndTime = new Date('{{ run.last_timestamp }}');
+        
+        // Data storage (full datasets)
+        let depthDataFull = [];
+        let altitudeDataFull = {}; // Object with keys: 'Altitude OA filt', 'Altitude Kogger', etc.
+        let motorDataFull = {}; // Object with keys: 'M1', 'M2', ..., 'M8'
+        let usvPositionDataFull = [];
+        let stateDataFull = []; // StateNb data (AUV)
+        let usvStateDataFull = []; // StateNb data (USV)
+        let usvOrderDataFull = []; // Order to AUV data (USV)
+        let usvOrderStringToInt = {}; // Mapping string -> int for Order to AUV
+        let usvOrderIntToString = {}; // Mapping int -> string for Order to AUV (reverse)
+        
+        // Display time range (controls what is shown on all graphs)
+        let displayStartTime = null; // First timestamp of AUV log
+        let displayEndTime = null;   // Last timestamp of AUV log
+        
+        // Filtered data (based on displayStartTime and displayEndTime)
+        let depthData = [];
+        let altitudeData = {};
+        let motorData = {};
+        let usvPositionData = [];
+        let stateData = []; // Filtered StateNb data (AUV)
+        let usvStateData = []; // Filtered StateNb data (USV)
+        let usvOrderData = []; // Filtered Order to AUV data (USV)
+        
+        let selectedTime = null;
+        let timeRange = { start: null, end: null }; // Selected time range for zoom (temporary, used to set displayStartTime/displayEndTime)
+        let isSelecting = false;
+        let selectionStart = null;
+        
+        // Expose variables to window for testing
+        window.displayStartTime = displayStartTime;
+        window.displayEndTime = displayEndTime;
+        window.depthData = depthData;
+        window.motorData = motorData;
+        window.usvPositionData = usvPositionData;
+        window.depthDataFull = depthDataFull;
+        
+        // Depth chart mode: 'depth-only', 'altitudes-only', 'depth-minus-altitudes'
+        let depthChartMode = 'depth-only';
+        
+        // Visibility flags for altitude curves (kept for compatibility, but controlled by mode)
+        let showDepth = true;
+        let showAltitudeOAFilt = true;
+        let showAltitudeKogger = true;
+        let showAltitudeKoggerRaw = true;
+        let showAltitudeOA = true;
+        
+        // Visibility flags for motors
+        let showM1 = true;
+        let showM2 = true;
+        let showM3 = true;
+        let showM4 = true;
+        let showM5 = true;
+        let showM6 = true;
+        let showM7 = true;
+        let showM8 = true;
+        
+        // Visibility flags for derived curves
+        let showAvant = true;
+        let showYaw = true;
+        let showUp = true;
+        
+        // Derived data storage
+        let derivedData = {
+            'Avant': [],
+            'Yaw': [],
+            'Up': []
+        };
+        
+        // Depth minus altitudes data storage
+        let depthMinusAltitudesData = {};
+        
+        // Update time range display
+        function updateTimeRangeDisplay() {
+            // Use displayStartTime and displayEndTime (the current display range)
+            if (displayStartTime === null || displayEndTime === null) {
+                document.getElementById('time-range-start').textContent = '--:--:--';
+                document.getElementById('time-range-end').textContent = '--:--:--';
+                document.getElementById('time-range-duration').textContent = '--';
+                return;
+            }
+            
+            const startTime = displayStartTime;
+            const endTime = displayEndTime;
+            
+            // Format times
+            const startDate = new Date(startTime);
+            const endDate = new Date(endTime);
+            
+            const startStr = startDate.toLocaleTimeString('fr-FR', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit',
+                hour12: false
+            });
+            
+            const endStr = endDate.toLocaleTimeString('fr-FR', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit',
+                hour12: false
+            });
+            
+            // Calculate duration
+            const durationMs = endTime - startTime;
+            const durationSeconds = Math.floor(durationMs / 1000);
+            const hours = Math.floor(durationSeconds / 3600);
+            const minutes = Math.floor((durationSeconds % 3600) / 60);
+            const seconds = durationSeconds % 60;
+            
+            let durationStr;
+            if (hours > 0) {
+                durationStr = `${hours}h ${minutes}m ${seconds}s`;
+            } else if (minutes > 0) {
+                durationStr = `${minutes}m ${seconds}s`;
+            } else {
+                durationStr = `${seconds}s`;
+            }
+            
+            // Update display
+            document.getElementById('time-range-start').textContent = startStr;
+            document.getElementById('time-range-end').textContent = endStr;
+            document.getElementById('time-range-duration').textContent = durationStr;
+        }
+        
+        // Expose timeRange globally for other scripts/graphs
+        window.getSelectedTimeRange = function() {
+            if (timeRange.start !== null && timeRange.end !== null) {
+                return {
+                    start: new Date(timeRange.start).toISOString(),
+                    end: new Date(timeRange.end).toISOString(),
+                    startTimestamp: timeRange.start,
+                    endTimestamp: timeRange.end
+                };
+            }
+            return null;
+        };
+        
+        // Function to set time range programmatically
+        window.setSelectedTimeRange = function(startTime, endTime) {
+            timeRange.start = new Date(startTime).getTime();
+            timeRange.end = new Date(endTime).getTime();
+            calculateDerivedData();
+            calculateDerivedData();
+            drawDepthChart();
+            drawMotorsChart();
+            drawDerivedChart();
+            drawStateChart();
+            updateMapTrajectory();
+            updateTimeRangeDisplay();
+        };
+        
+        // Chart setup
+        const canvas = document.getElementById('depth-chart');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('depth-chart-container');
+        const cursorLine = document.getElementById('cursor-line');
+        const timeDisplay = document.getElementById('time-display');
+        const timeRangeDisplay = document.getElementById('time-range-display');
+        
+        // Motors chart setup
+        const motorsCanvas = document.getElementById('motors-chart');
+        const motorsCtx = motorsCanvas.getContext('2d');
+        const motorsContainer = document.getElementById('motors-chart-container');
+        
+        const derivedCanvas = document.getElementById('derived-chart');
+        const derivedCtx = derivedCanvas.getContext('2d');
+        const derivedContainer = document.getElementById('derived-chart-container');
+        
+        const stateCanvas = document.getElementById('state-chart');
+        const stateCtx = stateCanvas.getContext('2d');
+        const stateContainer = document.getElementById('state-chart-container');
+        
+        // Map setup
+        let map = null;
+        let usvTrajectory = null;
+        let usvMarker = null;
+        window.usvMarker = usvMarker;
+        
+        // Initialize canvas size (with device pixel ratio for crisp rendering)
+        function resizeCanvas() {
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            // Set actual size in memory (scaled for device pixel ratio)
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            
+            // Scale the canvas back down using CSS
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+            
+            // Scale the drawing context so everything draws at the correct size
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            ctx.scale(dpr, dpr);
+            
+            console.log(`Canvas resized to ${canvas.width}x${canvas.height} (dpr: ${dpr})`);
+            if (depthData.length > 0) {
+                calculateDerivedData();
+                drawDepthChart();
+                drawMotorsChart();
+                drawDerivedChart();
+                drawStateChart();
+            }
+        }
+        
+        // Initialize motors canvas size (with device pixel ratio for crisp rendering)
+        function resizeMotorsCanvas() {
+            const rect = motorsContainer.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            // Set actual size in memory (scaled for device pixel ratio)
+            motorsCanvas.width = rect.width * dpr;
+            motorsCanvas.height = rect.height * dpr;
+            
+            // Scale the canvas back down using CSS
+            motorsCanvas.style.width = rect.width + 'px';
+            motorsCanvas.style.height = rect.height + 'px';
+            
+            // Scale the drawing context so everything draws at the correct size
+            motorsCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            motorsCtx.scale(dpr, dpr);
+            
+            console.log(`Motors canvas resized to ${motorsCanvas.width}x${motorsCanvas.height} (dpr: ${dpr})`);
+            if (Object.keys(motorData).length > 0) {
+                drawMotorsChart();
+            }
+        }
+        
+        // Initialize derived canvas size (with device pixel ratio for crisp rendering)
+        function resizeDerivedCanvas() {
+            const rect = derivedContainer.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            // Set actual size in memory (scaled for device pixel ratio)
+            derivedCanvas.width = rect.width * dpr;
+            derivedCanvas.height = rect.height * dpr;
+            
+            // Scale the canvas back down using CSS
+            derivedCanvas.style.width = rect.width + 'px';
+            derivedCanvas.style.height = rect.height + 'px';
+            
+            // Scale the drawing context so everything draws at the correct size
+            derivedCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            derivedCtx.scale(dpr, dpr);
+            
+            console.log(`Derived canvas resized to ${derivedCanvas.width}x${derivedCanvas.height} (dpr: ${dpr})`);
+            if (derivedData && Object.keys(derivedData).length > 0) {
+                drawDerivedChart();
+            }
+        }
+        
+        // Initialize state canvas size (with device pixel ratio for crisp rendering)
+        function resizeStateCanvas() {
+            const rect = stateContainer.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            
+            // Set actual size in memory (scaled for device pixel ratio)
+            stateCanvas.width = rect.width * dpr;
+            stateCanvas.height = rect.height * dpr;
+            
+            // Scale the canvas back down using CSS
+            stateCanvas.style.width = rect.width + 'px';
+            stateCanvas.style.height = rect.height + 'px';
+            
+            // Scale the drawing context so everything draws at the correct size
+            stateCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            stateCtx.scale(dpr, dpr);
+            
+            console.log(`State canvas resized to ${stateCanvas.width}x${stateCanvas.height} (dpr: ${dpr})`);
+            if (stateData && stateData.length > 0) {
+                drawStateChart();
+            }
+        }
+        
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            resizeMotorsCanvas();
+            resizeDerivedCanvas();
+            resizeStateCanvas();
+        });
+        // Wait for DOM to be ready
+        setTimeout(() => {
+            resizeCanvas();
+            resizeMotorsCanvas();
+            resizeDerivedCanvas();
+            resizeStateCanvas();
+        }, 100);
+        
+        // Load depth data
+        async function loadDepthData() {
+            try {
+                console.log(`Fetching depth data for run ${runId}...`);
+                const response = await fetch(`/api/run/${runId}/depth`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                depthDataFull = await response.json();
+                window.depthDataFull = depthDataFull;
+                console.log(`Loaded ${depthDataFull.length} depth points (full dataset)`);
+                
+                // Initialize display range if not set (use first and last timestamp from data)
+                if (displayStartTime === null || displayEndTime === null) {
+                    if (depthDataFull.length > 0) {
+                        const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
+                        displayStartTime = Math.min(...allTimes);
+                        displayEndTime = Math.max(...allTimes);
+                        window.displayStartTime = displayStartTime;
+                        window.displayEndTime = displayEndTime;
+                        console.log(`Initialized display range: ${new Date(displayStartTime).toISOString()} to ${new Date(displayEndTime).toISOString()}`);
+                    } else if (runStartTime && runEndTime) {
+                        // Fallback to run times
+                        displayStartTime = runStartTime.getTime();
+                        displayEndTime = runEndTime.getTime();
+                        window.displayStartTime = displayStartTime;
+                        window.displayEndTime = displayEndTime;
+                        console.log(`Using run times for display range`);
+                    }
+                }
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${depthData.length} depth points`);
+                
+                // Ensure canvas is properly sized before drawing
+                resizeCanvas();
+                // Wait a bit for canvas to be ready
+                setTimeout(() => {
+                    // Draw chart after data is loaded
+                    drawDepthChart();
+                    drawMotorsChart();
+                    drawDerivedChart();
+                    drawStateChart();
+                    updateTimeRangeDisplay();
+                }, 100);
+            } catch (error) {
+                console.error('Error loading depth data:', error);
+                // Show error message on canvas
+                const rect = container.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    ctx.clearRect(0, 0, rect.width, rect.height);
+                    ctx.fillStyle = '#dc3545';
+                    ctx.font = '16px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Erreur lors du chargement des données', rect.width / 2, rect.height / 2);
+                }
+            }
+        }
+        
+        // Load altitude data
+        async function loadAltitudeData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/altitude`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                altitudeData = await response.json();
+                console.log('Loaded altitude data:', Object.keys(altitudeData));
+                drawDepthChart();
+                drawMotorsChart();
+                calculateDerivedData();
+                drawDerivedChart();
+                drawStateChart();
+            } catch (error) {
+                console.error('Error loading altitude data:', error);
+            }
+        }
+        
+        // Load motor data
+        async function loadMotorData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/motors`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                motorDataFull = await response.json();
+                console.log('Loaded motor data (full):', Object.keys(motorDataFull));
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                
+                // Ensure canvas is properly sized before drawing
+                resizeMotorsCanvas();
+                resizeDerivedCanvas();
+                // Wait a bit for canvas to be ready
+                setTimeout(() => {
+                    calculateDerivedData();
+                    drawMotorsChart();
+                    drawDerivedChart();
+                    drawStateChart();
+                }, 100);
+            } catch (error) {
+                console.error('Error loading motor data:', error);
+            }
+        }
+        
+        // Draw motors chart
+        function drawMotorsChart() {
+            const rect = motorsContainer.getBoundingClientRect();
+            
+            if (!motorData || Object.keys(motorData).length === 0) {
+                // Clear using CSS dimensions (context is already scaled)
+                motorsCtx.clearRect(0, 0, rect.width, rect.height);
+                motorsCtx.fillStyle = '#666';
+                motorsCtx.font = '16px sans-serif';
+                motorsCtx.textAlign = 'center';
+                motorsCtx.fillText('Aucune donnée de moteurs disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            // Use same padding as depth chart, especially left padding (80) for alignment
+            const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                return;
+            }
+            
+            // Clear using CSS dimensions (context is already scaled by device pixel ratio)
+            motorsCtx.clearRect(0, 0, rect.width, rect.height);
+            
+            // Determine time range (use displayStartTime and displayEndTime)
+            if (displayStartTime === null || displayEndTime === null) {
+                motorsCtx.fillStyle = '#666';
+                motorsCtx.font = '16px sans-serif';
+                motorsCtx.textAlign = 'center';
+                motorsCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            
+            const timeSpan = maxTime - minTime;
+            
+            // Draw state background zones (before axes and curves)
+            drawStateBackground(motorsCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Collect all motor values (subtract 1500) - data is already filtered by filterDataByDisplayRange()
+            // Only include values from visible motors
+            let allMotorValues = [];
+            Object.keys(motorData).forEach(motorType => {
+                if (getMotorVisibility(motorType)) {
+                    const motorValues = motorData[motorType] || [];
+                    allMotorValues = allMotorValues.concat(motorValues.map(d => (d.value || 0) - 1500));
+                }
+            });
+            
+            if (allMotorValues.length === 0) {
+                motorsCtx.fillStyle = '#666';
+                motorsCtx.font = '16px sans-serif';
+                motorsCtx.textAlign = 'center';
+                motorsCtx.fillText('Aucune donnée de moteurs dans la plage sélectionnée', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minValue = Math.min(...allMotorValues);
+            const maxValue = Math.max(...allMotorValues);
+            // Round values (allow negative values)
+            const adjustedMinValue = Math.floor(minValue);
+            const adjustedMaxValue = Math.ceil(maxValue);
+            
+            // Draw axes
+            motorsCtx.strokeStyle = '#333';
+            motorsCtx.lineWidth = 1;
+            motorsCtx.beginPath();
+            // Y axis
+            motorsCtx.moveTo(padding.left, padding.top);
+            motorsCtx.lineTo(padding.left, padding.top + chartHeight);
+            // X axis
+            motorsCtx.moveTo(padding.left, padding.top + chartHeight);
+            motorsCtx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+            motorsCtx.stroke();
+            
+            // Draw horizontal grid lines (black)
+            motorsCtx.strokeStyle = '#000';
+            motorsCtx.lineWidth = 1;
+            const valueSteps = 8;
+            for (let i = 0; i <= valueSteps; i++) {
+                const value = adjustedMinValue + (adjustedMaxValue - adjustedMinValue) * (i / valueSteps);
+                const y = padding.top + chartHeight - (chartHeight * i / valueSteps);
+                motorsCtx.beginPath();
+                motorsCtx.moveTo(padding.left, y);
+                motorsCtx.lineTo(padding.left + chartWidth, y);
+                motorsCtx.stroke();
+            }
+            
+            // Draw zero line
+            const zeroY = padding.top + chartHeight - ((0 - adjustedMinValue) / (adjustedMaxValue - adjustedMinValue)) * chartHeight;
+            motorsCtx.strokeStyle = '#28a745';
+            motorsCtx.lineWidth = 2;
+            motorsCtx.beginPath();
+            motorsCtx.moveTo(padding.left, zeroY);
+            motorsCtx.lineTo(padding.left + chartWidth, zeroY);
+            motorsCtx.stroke();
+            
+            // Draw Y axis labels (rounded, starting from 0)
+            motorsCtx.fillStyle = '#666';
+            motorsCtx.font = '12px sans-serif';
+            motorsCtx.textAlign = 'right';
+            for (let i = 0; i <= valueSteps; i++) {
+                const value = adjustedMinValue + (adjustedMaxValue - adjustedMinValue) * (i / valueSteps);
+                const y = padding.top + chartHeight - (chartHeight * i / valueSteps);
+                const roundedValue = Math.round(value);
+                motorsCtx.fillText(`${roundedValue}`, padding.left - 10, y + 4);
+            }
+            
+            // Draw time labels
+            motorsCtx.textAlign = 'center';
+            motorsCtx.fillStyle = '#666';
+            const timeSteps = 8;
+            for (let i = 0; i <= timeSteps; i++) {
+                const time = minTime + (timeSpan * i / timeSteps);
+                const x = padding.left + (chartWidth * i / timeSteps);
+                const date = new Date(time);
+                const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                motorsCtx.fillText(timeStr, x, padding.top + chartHeight + 20);
+            }
+            
+            // Helper function to draw a curve (same as depth chart)
+            function drawMotorCurve(data, color, lineWidth = 1.5) {
+                if (!data || data.length === 0) return;
+                
+                motorsCtx.strokeStyle = color;
+                motorsCtx.lineWidth = lineWidth;
+                motorsCtx.lineCap = 'round';
+                motorsCtx.lineJoin = 'round';
+                motorsCtx.beginPath();
+                
+                let firstPoint = true;
+                data.forEach((point) => {
+                    const time = new Date(point.time).getTime();
+                    if (time < minTime || time > maxTime) return;
+                    
+                    const value = point.value !== undefined ? point.value : 0;
+                    if (value === undefined || value === null) return;
+                    
+                    const x = padding.left + ((time - minTime) / timeSpan) * chartWidth;
+                    const valueRange = adjustedMaxValue - adjustedMinValue;
+                    const valueRatio = ((value - 1500) - adjustedMinValue) / valueRange; // Subtract 1500
+                    const y = padding.top + chartHeight - (valueRatio * chartHeight);
+                    
+                    if (firstPoint) {
+                        motorsCtx.moveTo(x, y);
+                        firstPoint = false;
+                    } else {
+                        motorsCtx.lineTo(x, y);
+                    }
+                });
+                
+                motorsCtx.stroke();
+            }
+            
+            // Draw motor curves (M1-M8) using the same approach as depth chart
+            const motorColors = {
+                'M1': '#007bff',
+                'M2': '#28a745',
+                'M3': '#dc3545',
+                'M4': '#ffc107',
+                'M5': '#17a2b8',
+                'M6': '#6f42c1',
+                'M7': '#fd7e14',
+                'M8': '#20c997'
+            };
+            
+            const motorOrder = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8'];
+            motorOrder.forEach(motorType => {
+                if (motorData[motorType] && motorData[motorType].length > 0 && getMotorVisibility(motorType)) {
+                    const color = motorColors[motorType] || '#666';
+                    drawMotorCurve(motorData[motorType], color, 1.5);
+                }
+            });
+        }
+        
+        // Draw derived chart
+        function drawDerivedChart() {
+            const rect = derivedContainer.getBoundingClientRect();
+            
+            if (!derivedData || Object.keys(derivedData).length === 0) {
+                // Clear using CSS dimensions (context is already scaled)
+                derivedCtx.clearRect(0, 0, rect.width, rect.height);
+                derivedCtx.fillStyle = '#666';
+                derivedCtx.font = '16px sans-serif';
+                derivedCtx.textAlign = 'center';
+                derivedCtx.fillText('Aucune donnée dérivée disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            // Use same padding as motors chart
+            const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                return;
+            }
+            
+            // Clear using CSS dimensions (context is already scaled by device pixel ratio)
+            derivedCtx.clearRect(0, 0, rect.width, rect.height);
+            
+            // Determine time range (use displayStartTime and displayEndTime)
+            if (displayStartTime === null || displayEndTime === null) {
+                derivedCtx.fillStyle = '#666';
+                derivedCtx.font = '16px sans-serif';
+                derivedCtx.textAlign = 'center';
+                derivedCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            const timeSpan = maxTime - minTime;
+            
+            // Draw state background zones (before axes and curves)
+            drawStateBackground(derivedCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Collect all derived values (only from visible curves)
+            let allDerivedValues = [];
+            if (showAvant && derivedData['Avant'] && derivedData['Avant'].length > 0) {
+                allDerivedValues = allDerivedValues.concat(derivedData['Avant'].map(d => d.value || 0));
+            }
+            if (showYaw && derivedData['Yaw'] && derivedData['Yaw'].length > 0) {
+                allDerivedValues = allDerivedValues.concat(derivedData['Yaw'].map(d => d.value || 0));
+            }
+            if (showUp && derivedData['Up'] && derivedData['Up'].length > 0) {
+                allDerivedValues = allDerivedValues.concat(derivedData['Up'].map(d => d.value || 0));
+            }
+            
+            if (allDerivedValues.length === 0) {
+                derivedCtx.fillStyle = '#666';
+                derivedCtx.font = '16px sans-serif';
+                derivedCtx.textAlign = 'center';
+                derivedCtx.fillText('Aucune donnée dérivée dans la plage sélectionnée', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            // Fixed Y axis values: -100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100
+            const fixedYValues = [-100, -80, -60, -40, -20, 0, 20, 40, 60, 80, 100];
+            const fixedMinValue = -100;
+            const fixedMaxValue = 100;
+            
+            // Draw axes
+            derivedCtx.strokeStyle = '#333';
+            derivedCtx.lineWidth = 1;
+            derivedCtx.beginPath();
+            // Y axis
+            derivedCtx.moveTo(padding.left, padding.top);
+            derivedCtx.lineTo(padding.left, padding.top + chartHeight);
+            // X axis
+            derivedCtx.moveTo(padding.left, padding.top + chartHeight);
+            derivedCtx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+            derivedCtx.stroke();
+            
+            // Draw horizontal grid lines (black)
+            derivedCtx.strokeStyle = '#000';
+            derivedCtx.lineWidth = 1;
+            for (let i = 0; i < fixedYValues.length; i++) {
+                const value = fixedYValues[i];
+                const y = padding.top + chartHeight - ((value - fixedMinValue) / (fixedMaxValue - fixedMinValue)) * chartHeight;
+                derivedCtx.beginPath();
+                derivedCtx.moveTo(padding.left, y);
+                derivedCtx.lineTo(padding.left + chartWidth, y);
+                derivedCtx.stroke();
+            }
+            
+            // Draw zero line (green, thicker)
+            const zeroY = padding.top + chartHeight - ((0 - fixedMinValue) / (fixedMaxValue - fixedMinValue)) * chartHeight;
+            derivedCtx.strokeStyle = '#28a745';
+            derivedCtx.lineWidth = 2;
+            derivedCtx.beginPath();
+            derivedCtx.moveTo(padding.left, zeroY);
+            derivedCtx.lineTo(padding.left + chartWidth, zeroY);
+            derivedCtx.stroke();
+            
+            // Draw Y axis labels (fixed values)
+            derivedCtx.fillStyle = '#666';
+            derivedCtx.font = '12px sans-serif';
+            derivedCtx.textAlign = 'right';
+            for (let i = 0; i < fixedYValues.length; i++) {
+                const value = fixedYValues[i];
+                const y = padding.top + chartHeight - ((value - fixedMinValue) / (fixedMaxValue - fixedMinValue)) * chartHeight;
+                derivedCtx.fillText(`${value}`, padding.left - 10, y + 4);
+            }
+            
+            // Draw time labels
+            derivedCtx.textAlign = 'center';
+            derivedCtx.fillStyle = '#666';
+            const timeSteps = 8;
+            for (let i = 0; i <= timeSteps; i++) {
+                const time = minTime + (timeSpan * i / timeSteps);
+                const x = padding.left + (chartWidth * i / timeSteps);
+                const date = new Date(time);
+                const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                derivedCtx.fillText(timeStr, x, padding.top + chartHeight + 20);
+            }
+            
+            // Helper function to draw a curve
+            function drawDerivedCurve(data, color, lineWidth = 2) {
+                if (!data || data.length === 0) return;
+                
+                derivedCtx.strokeStyle = color;
+                derivedCtx.lineWidth = lineWidth;
+                derivedCtx.lineCap = 'round';
+                derivedCtx.lineJoin = 'round';
+                derivedCtx.beginPath();
+                
+                let firstPoint = true;
+                data.forEach((point) => {
+                    const time = new Date(point.time).getTime();
+                    if (time < minTime || time > maxTime) return;
+                    
+                    const value = point.value !== undefined ? point.value : 0;
+                    if (value === undefined || value === null) return;
+                    
+                    const x = padding.left + ((time - minTime) / timeSpan) * chartWidth;
+                    const valueRange = fixedMaxValue - fixedMinValue;
+                    const valueRatio = (value - fixedMinValue) / valueRange;
+                    const y = padding.top + chartHeight - (valueRatio * chartHeight);
+                    
+                    if (firstPoint) {
+                        derivedCtx.moveTo(x, y);
+                        firstPoint = false;
+                    } else {
+                        derivedCtx.lineTo(x, y);
+                    }
+                });
+                
+                derivedCtx.stroke();
+            }
+            
+            // Draw derived curves
+            const derivedColors = {
+                'Avant': '#007bff',
+                'Yaw': '#28a745',
+                'Up': '#dc3545'
+            };
+            
+            if (showAvant && derivedData['Avant'] && derivedData['Avant'].length > 0) {
+                drawDerivedCurve(derivedData['Avant'], derivedColors['Avant'], 2);
+            }
+            if (showYaw && derivedData['Yaw'] && derivedData['Yaw'].length > 0) {
+                drawDerivedCurve(derivedData['Yaw'], derivedColors['Yaw'], 2);
+            }
+            if (showUp && derivedData['Up'] && derivedData['Up'].length > 0) {
+                drawDerivedCurve(derivedData['Up'], derivedColors['Up'], 2);
+            }
+        }
+        
+        // Draw state chart with 3 curves (AUV StateNb, USV StateNb, USV Order to AUV)
+        function drawStateChart() {
+            const rect = stateContainer.getBoundingClientRect();
+            
+            // Use same padding as other charts
+            const padding = { top: 40, right: 40, bottom: 60, left: 100 }; // Increased left padding for 3 Y axes
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                return;
+            }
+            
+            // Clear using CSS dimensions (context is already scaled by device pixel ratio)
+            stateCtx.clearRect(0, 0, rect.width, rect.height);
+            
+            // Determine time range (use displayStartTime and displayEndTime)
+            if (displayStartTime === null || displayEndTime === null) {
+                stateCtx.fillStyle = '#666';
+                stateCtx.font = '16px sans-serif';
+                stateCtx.textAlign = 'center';
+                stateCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            const timeSpan = maxTime - minTime;
+            
+            // Draw state background zones (same as other charts)
+            drawStateBackground(stateCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Define 3 zones (each 1/3 of chart height)
+            const zoneHeight = chartHeight / 3;
+            const zone1Top = padding.top;
+            const zone1Bottom = padding.top + zoneHeight;
+            const zone2Top = padding.top + zoneHeight;
+            const zone2Bottom = padding.top + 2 * zoneHeight;
+            const zone3Top = padding.top + 2 * zoneHeight;
+            const zone3Bottom = padding.top + chartHeight;
+            
+            // Helper function to draw a step chart in a zone
+            function drawStepChart(data, zoneTop, zoneBottom, label, labelX) {
+                if (!data || data.length === 0) {
+                    // Draw label even if no data
+                    stateCtx.fillStyle = '#999';
+                    stateCtx.font = '12px sans-serif';
+                    stateCtx.textAlign = 'left';
+                    stateCtx.fillText(`${label} (aucune donnée)`, labelX + 5, zoneTop + 15);
+                    return;
+                }
+                
+                // Get all state values to determine Y axis range for this zone
+                const allStateValues = data.map(s => Math.round(s.value));
+                if (allStateValues.length === 0) {
+                    // Draw label even if no valid values
+                    stateCtx.fillStyle = '#999';
+                    stateCtx.font = '12px sans-serif';
+                    stateCtx.textAlign = 'left';
+                    stateCtx.fillText(`${label} (aucune donnée)`, labelX + 5, zoneTop + 15);
+                    return;
+                }
+                
+                const minState = Math.min(...allStateValues);
+                const maxState = Math.max(...allStateValues);
+                const adjustedMinState = Math.floor(minState) - 1;
+                const adjustedMaxState = Math.ceil(maxState) + 1;
+                const stateRange = adjustedMaxState - adjustedMinState;
+                
+                // Draw Y axis for this zone
+                stateCtx.strokeStyle = '#333';
+                stateCtx.lineWidth = 1;
+                stateCtx.beginPath();
+                stateCtx.moveTo(labelX, zoneTop);
+                stateCtx.lineTo(labelX, zoneBottom);
+                stateCtx.stroke();
+                
+                // Draw Y axis labels
+                stateCtx.fillStyle = '#666';
+                stateCtx.font = '11px sans-serif';
+                stateCtx.textAlign = 'right';
+                const stateSteps = Math.min(stateRange, 5); // Max 5 steps per zone
+                for (let i = 0; i <= stateSteps; i++) {
+                    const stateValue = adjustedMinState + (stateRange * i / stateSteps);
+                    if (stateValue >= minState && stateValue <= maxState) {
+                        const y = zoneBottom - ((stateValue - adjustedMinState) / stateRange) * (zoneBottom - zoneTop);
+                        stateCtx.fillText(`${Math.round(stateValue)}`, labelX - 5, y + 4);
+                    }
+                }
+                
+                // Draw zone label
+                stateCtx.fillStyle = '#333';
+                stateCtx.font = '12px sans-serif';
+                stateCtx.textAlign = 'left';
+                stateCtx.fillText(label, labelX + 5, zoneTop + 15);
+                
+                // Draw step chart
+                stateCtx.lineWidth = 2;
+                stateCtx.lineCap = 'round';
+                stateCtx.lineJoin = 'round';
+                stateCtx.strokeStyle = '#000';
+                
+                for (let i = 0; i < data.length; i++) {
+                    const currentState = data[i];
+                    const stateTime = new Date(currentState.time).getTime();
+                    const stateValue = Math.round(currentState.value);
+                    
+                    // Determine the end time for this state period
+                    let endTime;
+                    if (i < data.length - 1) {
+                        endTime = new Date(data[i + 1].time).getTime();
+                    } else {
+                        endTime = maxTime;
+                    }
+                    
+                    // Only draw if the period overlaps with the visible range
+                    if (endTime >= minTime && stateTime <= maxTime) {
+                        const startX = padding.left + ((Math.max(stateTime, minTime) - minTime) / timeSpan) * chartWidth;
+                        const endX = padding.left + ((Math.min(endTime, maxTime) - minTime) / timeSpan) * chartWidth;
+                        
+                        // Calculate Y position for this state value within the zone
+                        const stateRatio = (stateValue - adjustedMinState) / stateRange;
+                        const y = zoneBottom - (stateRatio * (zoneBottom - zoneTop));
+                        
+                        // Draw horizontal line for this state period
+                        stateCtx.beginPath();
+                        stateCtx.moveTo(startX, y);
+                        stateCtx.lineTo(endX, y);
+                        stateCtx.stroke();
+                        
+                        // Draw vertical line at state change (except for first point)
+                        if (i > 0 && stateTime >= minTime) {
+                            const prevState = data[i - 1];
+                            const prevStateValue = Math.round(prevState.value);
+                            const prevStateRatio = (prevStateValue - adjustedMinState) / stateRange;
+                            const prevY = zoneBottom - (prevStateRatio * (zoneBottom - zoneTop));
+                            
+                            stateCtx.beginPath();
+                            stateCtx.moveTo(startX, prevY);
+                            stateCtx.lineTo(startX, y);
+                            stateCtx.stroke();
+                        }
+                    }
+                }
+            }
+            
+            // Draw separator lines between zones
+            stateCtx.strokeStyle = '#ccc';
+            stateCtx.lineWidth = 1;
+            stateCtx.setLineDash([5, 5]);
+            stateCtx.beginPath();
+            stateCtx.moveTo(padding.left, zone2Top);
+            stateCtx.lineTo(padding.left + chartWidth, zone2Top);
+            stateCtx.stroke();
+            stateCtx.beginPath();
+            stateCtx.moveTo(padding.left, zone3Top);
+            stateCtx.lineTo(padding.left + chartWidth, zone3Top);
+            stateCtx.stroke();
+            stateCtx.setLineDash([]);
+            
+            // Draw X axis (time) at bottom
+            stateCtx.strokeStyle = '#333';
+            stateCtx.lineWidth = 1;
+            stateCtx.beginPath();
+            stateCtx.moveTo(padding.left, padding.top + chartHeight);
+            stateCtx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+            stateCtx.stroke();
+            
+            // Draw time labels
+            stateCtx.textAlign = 'center';
+            stateCtx.fillStyle = '#666';
+            stateCtx.font = '12px sans-serif';
+            const timeSteps = 8;
+            for (let i = 0; i <= timeSteps; i++) {
+                const time = minTime + (timeSpan * i / timeSteps);
+                const x = padding.left + (chartWidth * i / timeSteps);
+                const date = new Date(time);
+                const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                stateCtx.fillText(timeStr, x, padding.top + chartHeight + 20);
+            }
+            
+            // Draw the 3 curves in their respective zones
+            // Zone 1 (top): État AUV (StateNb)
+            drawStepChart(stateData, zone1Top, zone1Bottom, 'État AUV', padding.left - 30);
+            
+            // Zone 2 (middle): StateNb USV
+            drawStepChart(usvStateData, zone2Top, zone2Bottom, 'StateNb USV', padding.left - 30);
+            
+            // Zone 3 (bottom): Order to AUV USV
+            drawStepChart(usvOrderData, zone3Top, zone3Bottom, 'Order to AUV', padding.left - 30);
+            
+            // Draw legend for Order to AUV mapping
+            if (Object.keys(usvOrderIntToString).length > 0) {
+                stateCtx.fillStyle = '#333';
+                stateCtx.font = '11px sans-serif';
+                stateCtx.textAlign = 'left';
+                
+                let legendY = zone3Top + 20;
+                const legendX = padding.left + chartWidth - 200; // Position on the right
+                
+                stateCtx.fillText('Order to AUV:', legendX, legendY);
+                legendY += 15;
+                
+                // Sort by integer value
+                const sortedMappings = Object.keys(usvOrderIntToString)
+                    .map(k => parseInt(k))
+                    .sort((a, b) => a - b)
+                    .map(k => ({ int: k, str: usvOrderIntToString[k] }));
+                
+                sortedMappings.forEach(mapping => {
+                    stateCtx.fillText(`${mapping.int}: ${mapping.str}`, legendX + 10, legendY);
+                    legendY += 14;
+                });
+            }
+        }
+        
+        // Load StateNb data
+        async function loadStateData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/state`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                stateDataFull = await response.json();
+                console.log(`Loaded ${stateDataFull.length} StateNb points (full)`);
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${stateData.length} StateNb points`);
+            } catch (error) {
+                console.error('Error loading StateNb data:', error);
+            }
+        }
+        
+        // Load USV StateNb data
+        async function loadUSVStateData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/usv_state`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                usvStateDataFull = await response.json();
+                console.log(`Loaded ${usvStateDataFull.length} USV StateNb points (full)`);
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${usvStateData.length} USV StateNb points`);
+                
+                // Redraw state chart after loading
+                drawStateChart();
+            } catch (error) {
+                console.error('Error loading USV StateNb data:', error);
+            }
+        }
+        
+        // Load USV Order to AUV data
+        async function loadUSVOrderData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/usv_order`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const rawData = await response.json();
+                console.log(`Loaded ${rawData.length} USV Order to AUV points (full)`);
+                
+                // Build mapping from strings to integers
+                usvOrderStringToInt = {};
+                usvOrderIntToString = {};
+                const uniqueStrings = [...new Set(rawData.map(d => String(d.value)))].sort();
+                uniqueStrings.forEach((str, index) => {
+                    const intValue = index + 1; // Start from 1
+                    usvOrderStringToInt[str] = intValue;
+                    usvOrderIntToString[intValue] = str;
+                });
+                
+                // Convert string values to integers
+                usvOrderDataFull = rawData.map(d => ({
+                    time: d.time,
+                    value: usvOrderStringToInt[String(d.value)] || 0,
+                    originalValue: String(d.value) // Keep original for reference
+                }));
+                
+                console.log('Order to AUV mapping:', usvOrderIntToString);
+                console.log(`Loaded ${usvOrderDataFull.length} USV Order to AUV points (full)`, usvOrderDataFull.slice(0, 3));
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${usvOrderData.length} USV Order to AUV points`, usvOrderData.slice(0, 3));
+                
+                // Redraw state chart after loading
+                if (displayStartTime !== null && displayEndTime !== null) {
+                    drawStateChart();
+                }
+            } catch (error) {
+                console.error('Error loading USV Order to AUV data:', error);
+            }
+        }
+        
+        // Load USV position data
+        async function loadUSVPositionData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/usv_position`);
+                usvPositionDataFull = await response.json();
+                console.log(`Loaded ${usvPositionDataFull.length} USV position points (full)`);
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${usvPositionData.length} USV position points`);
+                
+                if (usvPositionData.length === 0) {
+                    console.warn('No USV position data found for this run period');
+                }
+                initMap();
+            } catch (error) {
+                console.error('Error loading USV position data:', error);
+            }
+        }
+        
+        // State color palette (pastel colors) - same for all charts
+        function getStateColor(stateValue, opacity = 0.3) {
+            const stateColors = {
+                4: [255, 182, 193],   // Rose pastel
+                11: [173, 216, 230],  // Bleu ciel pastel
+                13: [144, 238, 144],  // Vert clair pastel
+                14: [255, 228, 196],  // Bisque pastel
+                26: [221, 160, 221]   // Prune pastel
+            };
+            const color = stateColors[stateValue] || [200, 200, 200]; // Gris pastel par défaut
+            return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${opacity})`;
+        }
+        
+        // Draw state background zones
+        function drawStateBackground(ctx, padding, chartWidth, chartHeight, minTime, maxTime) {
+            if (!stateData || stateData.length === 0) {
+                return; // No state data, don't draw anything
+            }
+            
+            const timeSpan = maxTime - minTime;
+            if (timeSpan <= 0) return;
+            
+            // Find the first state that applies to the visible range
+            // If the first state is before minTime, use it from minTime
+            let startIndex = 0;
+            let firstStateTime = new Date(stateData[0].time).getTime();
+            
+            // If first state is before minTime, we'll use it from minTime
+            // Otherwise, find the first state within or after the range
+            for (let i = 0; i < stateData.length; i++) {
+                const stateTime = new Date(stateData[i].time).getTime();
+                if (stateTime <= minTime) {
+                    startIndex = i;
+                    firstStateTime = stateTime;
+                } else {
+                    break;
+                }
+            }
+            
+            // Process state changes to create periods
+            for (let i = startIndex; i < stateData.length; i++) {
+                const currentState = stateData[i];
+                const stateTime = new Date(currentState.time).getTime();
+                const stateValue = Math.round(currentState.value);
+                
+                // Determine the start time for this period
+                let periodStartTime = stateTime;
+                if (i === startIndex && stateTime < minTime) {
+                    // First period starts at minTime if state is before
+                    periodStartTime = minTime;
+                }
+                
+                // Determine the end time for this state period
+                let endTime;
+                if (i < stateData.length - 1) {
+                    // Next state change
+                    endTime = new Date(stateData[i + 1].time).getTime();
+                } else {
+                    // Last state, extend to end of display range
+                    endTime = maxTime;
+                }
+                
+                // Only draw if the period overlaps with the visible range
+                if (endTime >= minTime && periodStartTime <= maxTime) {
+                    // Calculate x positions
+                    const startX = padding.left + ((Math.max(periodStartTime, minTime) - minTime) / timeSpan) * chartWidth;
+                    const endX = padding.left + ((Math.min(endTime, maxTime) - minTime) / timeSpan) * chartWidth;
+                    
+                    // Draw rectangle covering full height
+                    ctx.fillStyle = getStateColor(stateValue);
+                    ctx.fillRect(startX, padding.top, endX - startX, chartHeight);
+                }
+            }
+        }
+        
+        // Draw depth chart
+        function drawDepthChart() {
+            if (!depthData || depthData.length === 0) {
+                console.log('No depth data to draw', depthData);
+                // Draw a message
+                const rect = container.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    ctx.clearRect(0, 0, rect.width, rect.height);
+                    ctx.fillStyle = '#666';
+                    ctx.font = '16px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Aucune donnée de profondeur disponible', rect.width / 2, rect.height / 2);
+                }
+                return;
+            }
+            
+            console.log(`Drawing depth chart with ${depthData.length} points`);
+            const rect = container.getBoundingClientRect();
+            const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                console.warn(`Invalid chart dimensions: ${chartWidth}x${chartHeight}`);
+                return;
+            }
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Determine time range (use displayStartTime and displayEndTime)
+            if (displayStartTime === null || displayEndTime === null) {
+                ctx.fillStyle = '#666';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            const timeSpan = maxTime - minTime;
+            
+            // Draw state background zones (before axes and curves)
+            drawStateBackground(ctx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Data is already filtered by filterDataByDisplayRange(), so use depthData directly
+            // Find depth/altitude range from visible data according to mode
+            let allValues = [];
+            
+            if (depthChartMode === 'depth-only') {
+                // Mode 1: Profondeur seulement
+                if (depthData.length > 0) {
+                    allValues = allValues.concat(depthData.map(d => d.depth || 0));
+                }
+            } else if (depthChartMode === 'altitudes-only') {
+                // Mode 2: Altitudes seulement (négatives)
+                if (altitudeData && Object.keys(altitudeData).length > 0) {
+                    Object.keys(altitudeData).forEach(altType => {
+                        const altData = altitudeData[altType] || [];
+                        // Multiply by -1 to make values negative
+                        allValues = allValues.concat(altData.map(d => -(d.altitude || 0)));
+                    });
+                }
+            } else if (depthChartMode === 'depth-minus-altitudes') {
+                // Mode 3: Profondeur - Altitudes
+                if (depthData.length > 0) {
+                    allValues = allValues.concat(depthData.map(d => d.depth || 0));
+                }
+                // Add depth minus altitudes values
+                if (depthMinusAltitudesData && Object.keys(depthMinusAltitudesData).length > 0) {
+                    Object.keys(depthMinusAltitudesData).forEach(altType => {
+                        const data = depthMinusAltitudesData[altType] || [];
+                        allValues = allValues.concat(data.map(d => d.value || 0));
+                    });
+                }
+            }
+            
+            if (allValues.length === 0) {
+                allValues = [0, -50]; // Default range if no data
+            }
+            
+            const minDepth = Math.min(0, Math.min(...allValues)); // Start from 0 (surface) or minimum
+            const maxDepth = Math.max(0, Math.max(...allValues)); // Go down to maximum depth (negative)
+            
+            // Round depth values (keep negative values for depth below surface)
+            const adjustedMinDepth = Math.floor(minDepth);
+            const adjustedMaxDepth = Math.ceil(maxDepth);
+            
+            // Draw axes
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            // Y axis (depth)
+            ctx.moveTo(padding.left, padding.top);
+            ctx.lineTo(padding.left, padding.top + chartHeight);
+            // X axis (time)
+            ctx.moveTo(padding.left, padding.top + chartHeight);
+            ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
+            ctx.stroke();
+            
+            // Draw horizontal grid lines (black)
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            const depthSteps = 8;
+            for (let i = 0; i <= depthSteps; i++) {
+                const depth = adjustedMinDepth + (adjustedMaxDepth - adjustedMinDepth) * (i / depthSteps);
+                const y = padding.top + chartHeight - (chartHeight * i / depthSteps);
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(padding.left + chartWidth, y);
+                ctx.stroke();
+            }
+            
+            // Draw zero line (surface) - draw it first so it's behind everything
+            const zeroY = padding.top + chartHeight - ((0 - adjustedMinDepth) / (adjustedMaxDepth - adjustedMinDepth)) * chartHeight;
+            ctx.strokeStyle = '#28a745';
+            ctx.lineWidth = 2; // Make it more visible
+            ctx.setLineDash([]); // Solid line
+            ctx.beginPath();
+            ctx.moveTo(padding.left, zeroY);
+            ctx.lineTo(padding.left + chartWidth, zeroY);
+            ctx.stroke();
+            
+            // Draw depth labels (negative values for depth below surface, rounded values)
+            ctx.fillStyle = '#666';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= depthSteps; i++) {
+                const depth = adjustedMinDepth + (adjustedMaxDepth - adjustedMinDepth) * (i / depthSteps);
+                const y = padding.top + chartHeight - (chartHeight * i / depthSteps);
+                // Round to nearest integer for display
+                const roundedDepth = Math.round(depth);
+                ctx.fillText(`${roundedDepth}m`, padding.left - 10, y + 4);
+            }
+            
+            // Draw time labels
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#666';
+            const timeSteps = 8;
+            for (let i = 0; i <= timeSteps; i++) {
+                const time = minTime + (timeSpan * i / timeSteps);
+                const x = padding.left + (chartWidth * i / timeSteps);
+                const date = new Date(time);
+                const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                ctx.fillText(timeStr, x, padding.top + chartHeight + 20);
+            }
+            
+            // Helper function to draw a curve
+            function drawCurve(data, color, lineWidth = 2, valueKey = 'depth') {
+                if (!data || data.length === 0) return;
+                
+                ctx.strokeStyle = color;
+                ctx.lineWidth = lineWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                
+                let firstPoint = true;
+                data.forEach((point) => {
+                    const time = new Date(point.time).getTime();
+                    if (time < minTime || time > maxTime) return;
+                    
+                    const value = point[valueKey] !== undefined ? point[valueKey] : (point.depth !== undefined ? point.depth : point.altitude);
+                    if (value === undefined || value === null) return;
+                    
+                    const x = padding.left + ((time - minTime) / timeSpan) * chartWidth;
+                    const depthRange = adjustedMaxDepth - adjustedMinDepth;
+                    const depthRatio = (value - adjustedMinDepth) / depthRange;
+                    const y = padding.top + chartHeight - (depthRatio * chartHeight);
+                    
+                    if (firstPoint) {
+                        ctx.moveTo(x, y);
+                        firstPoint = false;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                
+                ctx.stroke();
+            }
+            
+            // Draw curves according to mode
+            const altitudeColors = {
+                'Altitude OA filt': '#28a745',
+                'Altitude Kogger': '#dc3545',
+                'Altitude Kogger raw': '#ffc107',
+                'Altitude OA': '#17a2b8'
+            };
+            
+            if (depthChartMode === 'depth-only') {
+                // Mode 1: Profondeur seulement
+                if (depthData.length > 0) {
+                    drawCurve(depthData.map(d => ({ time: d.time, depth: d.depth || 0 })), '#007bff', 2, 'depth');
+                    
+                    // Draw area under depth curve (fill from curve to zero line)
+                    ctx.beginPath();
+                    
+                    const firstDepthPoint = depthData[0];
+                    const lastDepthPoint = depthData[depthData.length - 1];
+                    const firstDepthTime = new Date(firstDepthPoint.time).getTime();
+                    const lastDepthTime = new Date(lastDepthPoint.time).getTime();
+                    const firstDepthX = padding.left + ((firstDepthTime - minTime) / timeSpan) * chartWidth;
+                    const lastDepthX = padding.left + ((lastDepthTime - minTime) / timeSpan) * chartWidth;
+                    
+                    // Redraw depth curve for fill
+                    depthData.forEach((point, idx) => {
+                        const time = new Date(point.time).getTime();
+                        const depth = point.depth || 0;
+                        const x = padding.left + ((time - minTime) / timeSpan) * chartWidth;
+                        const depthRange = adjustedMaxDepth - adjustedMinDepth;
+                        const depthRatio = (depth - adjustedMinDepth) / depthRange;
+                        const y = padding.top + chartHeight - (depthRatio * chartHeight);
+                        
+                        if (idx === 0) {
+                            ctx.moveTo(x, y);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    
+                    ctx.lineTo(lastDepthX, zeroY);
+                    ctx.lineTo(firstDepthX, zeroY);
+                    ctx.closePath();
+                    ctx.fillStyle = 'rgba(0, 123, 255, 0.2)';
+                    ctx.fill();
+                }
+            } else if (depthChartMode === 'altitudes-only') {
+                // Mode 2: Altitudes seulement (négatives)
+                if (altitudeData && Object.keys(altitudeData).length > 0) {
+                    Object.keys(altitudeData).forEach(altType => {
+                        const altData = altitudeData[altType] || [];
+                        const color = altitudeColors[altType] || '#666';
+                        // Multiply altitude by -1 to make it negative
+                        drawCurve(altData.map(d => ({ time: d.time, depth: -(d.altitude || 0) })), color, 2, 'depth');
+                    });
+                }
+            } else if (depthChartMode === 'depth-minus-altitudes') {
+                // Mode 3: Profondeur - Altitudes
+                // Draw depth curve
+                if (depthData.length > 0) {
+                    drawCurve(depthData.map(d => ({ time: d.time, depth: d.depth || 0 })), '#007bff', 2, 'depth');
+                }
+                
+                // Draw depth minus altitudes curves
+                if (depthMinusAltitudesData && Object.keys(depthMinusAltitudesData).length > 0) {
+                    Object.keys(depthMinusAltitudesData).forEach(altType => {
+                        const data = depthMinusAltitudesData[altType] || [];
+                        const color = altitudeColors[altType] || '#666';
+                        drawCurve(data.map(d => ({ time: d.time, depth: d.value || 0 })), color, 2, 'depth');
+                    });
+                }
+            }
+            
+            // Draw selection range if active
+            if (timeRange.start !== null && timeRange.end !== null) {
+                const startX = padding.left + ((timeRange.start - minTime) / timeSpan) * chartWidth;
+                const endX = padding.left + ((timeRange.end - minTime) / timeSpan) * chartWidth;
+                const selectionLeft = Math.min(startX, endX);
+                const selectionWidth = Math.abs(endX - startX);
+                
+                // Draw selection rectangle
+                ctx.fillStyle = 'rgba(0, 123, 255, 0.2)';
+                ctx.fillRect(selectionLeft, padding.top, selectionWidth, chartHeight);
+                ctx.strokeStyle = '#007bff';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(selectionLeft, padding.top, selectionWidth, chartHeight);
+                
+                // Draw markers at start and end points
+                ctx.fillStyle = '#007bff';
+                ctx.beginPath();
+                ctx.arc(startX, padding.top + chartHeight / 2, 5, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(endX, padding.top + chartHeight / 2, 5, 0, 2 * Math.PI);
+                ctx.fill();
+            } else if (waitingForSecondClick && firstClickTime !== null) {
+                // Show first click point while waiting for second click (don't affect zoom)
+                const firstX = padding.left + ((firstClickTime - minTime) / timeSpan) * chartWidth;
+                ctx.fillStyle = '#ffc107';
+                ctx.beginPath();
+                ctx.arc(firstX, padding.top + chartHeight / 2, 6, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = '#ff9800';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(firstX, padding.top);
+                ctx.lineTo(firstX, padding.top + chartHeight);
+                ctx.stroke();
+            }
+            
+            // Draw cursor if time is selected (works even when zoomed)
+            if (selectedTime !== null) {
+                // Only show cursor if selected time is within visible range
+                if (selectedTime >= minTime && selectedTime <= maxTime) {
+                    const cursorX = padding.left + ((selectedTime - minTime) / timeSpan) * chartWidth;
+                    cursorLine.style.left = cursorX + 'px';
+                    cursorLine.style.display = 'block';
+                    
+                    // Update time display
+                    const date = new Date(selectedTime);
+                    timeDisplay.textContent = date.toLocaleString('fr-FR', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                    timeDisplay.style.display = 'block';
+                } else {
+                    cursorLine.style.display = 'none';
+                }
+            } else {
+                cursorLine.style.display = 'none';
+                if (timeRange.start === null) {
+                    timeDisplay.style.display = 'none';
+                }
+            }
+            
+            // Display time range if waiting for second click (selection in progress)
+            if (waitingForSecondClick && firstClickTime !== null) {
+                const startDate = new Date(firstClickTime);
+                timeRangeDisplay.textContent = `Premier clic: ${startDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })} - Cliquez pour définir la fin`;
+                timeRangeDisplay.classList.add('active');
+            } else {
+                timeRangeDisplay.classList.remove('active');
+            }
+        }
+        
+        // Get current visible time range (accounting for zoom)
+        function getVisibleTimeRange() {
+            const allTimes = depthData.map(d => new Date(d.time).getTime());
+            if (timeRange.start !== null && timeRange.end !== null) {
+                return {
+                    min: Math.min(timeRange.start, timeRange.end),
+                    max: Math.max(timeRange.start, timeRange.end)
+                };
+            }
+            return {
+                min: Math.min(...allTimes),
+                max: Math.max(...allTimes)
+            };
+        }
+        
+        // Two-click selection: first click = start, second click = end + zoom
+        let firstClickTime = null;
+        let waitingForSecondClick = false;
+        let cancelTimeout = null;
+        
+        // Expose waitingForSecondClick to window for testing
+        window.waitingForSecondClick = waitingForSecondClick;
+        
+        // Helper function to get time from X coordinate
+        function getTimeFromX(x) {
+            const padding = { left: 80, right: 40 };
+            // Use CSS width (not physical canvas width) to match mouse coordinates
+            const rect = container.getBoundingClientRect();
+            const cssWidth = rect.width;
+            const chartWidth = cssWidth - padding.left - padding.right;
+            if (x < padding.left || x > cssWidth - padding.right) return null;
+            
+            const visibleRange = getVisibleTimeRange();
+            const timeSpan = visibleRange.max - visibleRange.min;
+            const relativeX = (x - padding.left) / chartWidth;
+            return visibleRange.min + (relativeX * timeSpan);
+        }
+        
+        // Helper function to check if point is in chart area
+        function isInChartArea(x, y) {
+            const padding = { left: 80, right: 40, top: 40, bottom: 60 };
+            // Use CSS dimensions (not physical canvas dimensions) to match mouse coordinates
+            const rect = container.getBoundingClientRect();
+            return x >= padding.left && 
+                   x <= rect.width - padding.right && 
+                   y >= padding.top && 
+                   y <= rect.height - padding.bottom;
+        }
+        
+        // Handle clicks - two-click selection
+        canvas.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (!isInChartArea(x, y)) return;
+            
+            const clickedTime = getTimeFromX(x);
+            if (clickedTime === null) return;
+            
+            if (!waitingForSecondClick || firstClickTime === null) {
+                // First click - just store the time, don't modify timeRange or graphs
+                firstClickTime = clickedTime;
+                waitingForSecondClick = true;
+                window.waitingForSecondClick = waitingForSecondClick;
+                selectedTime = null;
+                
+                // Clear any existing selection display
+                cursorLine.style.display = 'none';
+                timeDisplay.style.display = 'none';
+                
+                // Visual feedback - redraw to show first point indicator
+                drawDepthChart();
+                drawMotorsChart();
+                drawDerivedChart();
+                drawStateChart();
+                
+                // Set timeout to cancel if no second click within 3 seconds
+                if (cancelTimeout) clearTimeout(cancelTimeout);
+                cancelTimeout = setTimeout(() => {
+                    if (waitingForSecondClick) {
+                        waitingForSecondClick = false;
+                        window.waitingForSecondClick = waitingForSecondClick;
+                        firstClickTime = null;
+                        drawDepthChart();
+                        drawMotorsChart();
+                        drawDerivedChart();
+                        drawStateChart();
+                    }
+                }, 3000);
+            } else {
+                // Second click - set end time and zoom
+                const secondClickTime = clickedTime;
+                waitingForSecondClick = false;
+                window.waitingForSecondClick = waitingForSecondClick;
+                if (cancelTimeout) {
+                    clearTimeout(cancelTimeout);
+                    cancelTimeout = null;
+                }
+                
+                // Ensure start < end
+                let startTime, endTime;
+                if (firstClickTime < secondClickTime) {
+                    startTime = firstClickTime;
+                    endTime = secondClickTime;
+                } else {
+                    startTime = secondClickTime;
+                    endTime = firstClickTime;
+                }
+                
+                // Only zoom if duration is meaningful (> 0.1 second)
+                const duration = Math.abs(endTime - startTime);
+                if (duration < 100) {
+                    // Too small, cancel selection
+                    firstClickTime = null;
+                    drawDepthChart();
+                    drawMotorsChart();
+                    drawDerivedChart();
+                    drawStateChart();
+                } else {
+                    // Update display range (this is the zoom)
+                    displayStartTime = startTime;
+                    displayEndTime = endTime;
+                    window.displayStartTime = displayStartTime;
+                    window.displayEndTime = displayEndTime;
+                    
+                    // Clear temporary selection
+                    timeRange.start = null;
+                    timeRange.end = null;
+                    
+                    // Filter all data based on new display range
+                    filterDataByDisplayRange();
+                    
+            // Update all charts
+            calculateDerivedData();
+            drawDepthChart();
+            drawMotorsChart();
+            drawDerivedChart();
+            drawStateChart();
+            updateMapTrajectory();
+            updateTimeRangeDisplay();
+                }
+                
+                firstClickTime = null;
+            }
+        });
+        
+        // Mouse move - show cursor when hovering (works even when zoomed)
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (isInChartArea(x, y) && !waitingForSecondClick) {
+                // Show cursor when hovering (works with or without zoom)
+                const currentTime = getTimeFromX(x);
+                if (currentTime !== null) {
+                    selectedTime = currentTime;
+                    drawDepthChart();
+                    drawMotorsChart();
+                    drawDerivedChart();
+                    drawStateChart();
+                    updateMapMarker();
+                }
+            }
+        });
+        
+        // Mouse leave - reset cursor (but keep zoom if active)
+        canvas.addEventListener('mouseleave', (e) => {
+            if (!waitingForSecondClick) {
+                selectedTime = null;
+                cursorLine.style.display = 'none';
+                // Only hide time display if no zoom is active
+                if (timeRange.start === null) {
+                    timeDisplay.style.display = 'none';
+                }
+                drawDepthChart();
+                drawMotorsChart();
+                drawDerivedChart();
+                drawStateChart();
+                if (usvMarker) {
+                    usvMarker.remove();
+                    usvMarker = null;
+                    window.usvMarker = usvMarker;
+                }
+            }
+        });
+        
+        // Right click to reset zoom/selection (restore to full AUV log range)
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            timeRange.start = null;
+            timeRange.end = null;
+            selectedTime = null;
+            isSelecting = false;
+            selectionStart = null;
+            
+            // Reset display range to full AUV log range
+            if (depthDataFull.length > 0) {
+                const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
+                displayStartTime = Math.min(...allTimes);
+                displayEndTime = Math.max(...allTimes);
+                window.displayStartTime = displayStartTime;
+                window.displayEndTime = displayEndTime;
+            } else if (runStartTime && runEndTime) {
+                displayStartTime = runStartTime.getTime();
+                displayEndTime = runEndTime.getTime();
+                window.displayStartTime = displayStartTime;
+                window.displayEndTime = displayEndTime;
+            }
+            
+            // Filter all data based on reset range
+            filterDataByDisplayRange();
+            
+            // Update all charts
+            calculateDerivedData();
+            drawDepthChart();
+            drawMotorsChart();
+            drawDerivedChart();
+            drawStateChart();
+            updateMapTrajectory();
+            updateTimeRangeDisplay();
+        });
+        
+        // Filter data based on displayStartTime and displayEndTime
+        function filterDataByDisplayRange() {
+            if (displayStartTime === null || displayEndTime === null) {
+                return;
+            }
+            
+            // Filter depth data
+            depthData = depthDataFull.filter(d => {
+                const time = new Date(d.time).getTime();
+                return time >= displayStartTime && time <= displayEndTime;
+            });
+            window.depthData = depthData;
+            
+            // Filter altitude data
+            altitudeData = {};
+            Object.keys(altitudeDataFull).forEach(altType => {
+                altitudeData[altType] = altitudeDataFull[altType].filter(d => {
+                    const time = new Date(d.time).getTime();
+                    return time >= displayStartTime && time <= displayEndTime;
+                });
+            });
+            
+            // Filter motor data
+            motorData = {};
+            Object.keys(motorDataFull).forEach(motorType => {
+                motorData[motorType] = motorDataFull[motorType].filter(d => {
+                    const time = new Date(d.time).getTime();
+                    return time >= displayStartTime && time <= displayEndTime;
+                });
+            });
+            window.motorData = motorData;
+            
+            // Filter USV position data
+            usvPositionData = usvPositionDataFull.filter(p => {
+                const pointTime = new Date(p.time).getTime();
+                return pointTime >= displayStartTime && pointTime <= displayEndTime;
+            });
+            window.usvPositionData = usvPositionData;
+            
+            // Filter StateNb data
+            stateData = stateDataFull.filter(s => {
+                const time = new Date(s.time).getTime();
+                return time >= displayStartTime && time <= displayEndTime;
+            });
+            
+            // Filter USV StateNb data
+            usvStateData = usvStateDataFull.filter(s => {
+                const time = new Date(s.time).getTime();
+                return time >= displayStartTime && time <= displayEndTime;
+            });
+            
+            // Filter USV Order to AUV data
+            usvOrderData = usvOrderDataFull.filter(s => {
+                const time = new Date(s.time).getTime();
+                return time >= displayStartTime && time <= displayEndTime;
+            });
+            
+            // Calculate derived data from motor data
+            calculateDerivedData();
+            
+            // Calculate depth minus altitudes data
+            calculateDepthMinusAltitudes();
+        }
+        
+        // Calculate depth minus altitudes data for each altitude type
+        function calculateDepthMinusAltitudes() {
+            depthMinusAltitudesData = {};
+            
+            if (!depthData || depthData.length === 0 || !altitudeData || Object.keys(altitudeData).length === 0) {
+                return;
+            }
+            
+            // For each altitude type
+            Object.keys(altitudeData).forEach(altType => {
+                const altData = altitudeData[altType] || [];
+                if (altData.length === 0) return;
+                
+                // Get all unique timestamps from both depth and altitude data
+                const allTimes = new Set();
+                depthData.forEach(d => allTimes.add(d.time));
+                altData.forEach(a => allTimes.add(a.time));
+                
+                const sortedTimes = Array.from(allTimes).sort();
+                
+                // For each timestamp, find closest depth and altitude values
+                const result = [];
+                sortedTimes.forEach(time => {
+                    // Find closest depth value
+                    let depthValue = null;
+                    let minDepthDiff = Infinity;
+                    depthData.forEach(d => {
+                        const diff = Math.abs(new Date(d.time).getTime() - new Date(time).getTime());
+                        if (diff < minDepthDiff) {
+                            minDepthDiff = diff;
+                            depthValue = d.depth || 0;
+                        }
+                    });
+                    
+                    // Find closest altitude value
+                    let altitudeValue = null;
+                    let minAltDiff = Infinity;
+                    altData.forEach(a => {
+                        const diff = Math.abs(new Date(a.time).getTime() - new Date(time).getTime());
+                        if (diff < minAltDiff) {
+                            minAltDiff = diff;
+                            altitudeValue = a.altitude || 0;
+                        }
+                    });
+                    
+                    // Calculate depth - altitude if both values are available
+                    if (depthValue !== null && altitudeValue !== null) {
+                        result.push({
+                            time: time,
+                            value: depthValue - altitudeValue
+                        });
+                    }
+                });
+                
+                depthMinusAltitudesData[altType] = result;
+            });
+        }
+        
+        // Calculate derived data from motor data
+        function calculateDerivedData() {
+            derivedData = {
+                'Avant': [],
+                'Yaw': [],
+                'Up': []
+            };
+            
+            if (!motorData || Object.keys(motorData).length === 0) {
+                return;
+            }
+            
+            // Get all unique timestamps from motor data
+            const allTimes = new Set();
+            Object.keys(motorData).forEach(motorType => {
+                motorData[motorType].forEach(point => {
+                    allTimes.add(point.time);
+                });
+            });
+            
+            const sortedTimes = Array.from(allTimes).sort();
+            
+            sortedTimes.forEach(time => {
+                // Get motor values at this time (or closest)
+                const getMotorValue = (motorType) => {
+                    const motorPoints = motorData[motorType] || [];
+                    const point = motorPoints.find(p => p.time === time);
+                    return point ? (point.value || 0) : null;
+                };
+                
+                const m1 = getMotorValue('M1');
+                const m2 = getMotorValue('M2');
+                const m5 = getMotorValue('M5');
+                const m6 = getMotorValue('M6');
+                const m7 = getMotorValue('M7');
+                const m8 = getMotorValue('M8');
+                
+                // Calculate derived values only if we have the required motors
+                if (m1 !== null && m2 !== null) {
+                    derivedData['Avant'].push({
+                        time: time,
+                        value: (m1 - m2) / 8
+                    });
+                    derivedData['Yaw'].push({
+                        time: time,
+                        value: (m1 + m2) / 800
+                    });
+                }
+                
+                if (m5 !== null && m6 !== null && m7 !== null && m8 !== null) {
+                    derivedData['Up'].push({
+                        time: time,
+                        value: ((m6 + m7) - (m5 + m8)) / 16
+                    });
+                }
+            });
+        }
+        
+        // Get filtered position data based on display time range
+        function getFilteredPositionData() {
+            return usvPositionData; // Already filtered by filterDataByDisplayRange()
+        }
+        
+        // Initialize map
+        function initMap() {
+            if (usvPositionData.length === 0) {
+                console.log('No USV position data to display on map');
+                // Show a message in the map container
+                const mapDiv = document.getElementById('map');
+                mapDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Aucune donnée de position USV disponible pour cette période</div>';
+                return;
+            }
+            
+            console.log(`Initializing map with ${usvPositionData.length} position points`);
+            
+            // Get filtered data
+            const filteredData = getFilteredPositionData();
+            
+            if (filteredData.length === 0) {
+                console.log('No data in selected time range');
+                return;
+            }
+            
+            // Calculate bounds from filtered data
+            const lats = filteredData.map(p => p.lat);
+            const lons = filteredData.map(p => p.lon);
+            const minLat = Math.min(...lats);
+            const maxLat = Math.max(...lats);
+            const minLon = Math.min(...lons);
+            const maxLon = Math.max(...lons);
+            
+            console.log(`Map bounds: lat [${minLat}, ${maxLat}], lon [${minLon}, ${maxLon}]`);
+            
+            // Create map if it doesn't exist
+            if (!map) {
+                map = L.map('map').fitBounds([
+                    [minLat, minLon],
+                    [maxLat, maxLon]
+                ], { padding: [20, 20] });
+                
+                // Add satellite tile layer (Esri World Imagery)
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Esri',
+                    maxZoom: 19
+                }).addTo(map);
+            }
+            
+            // Remove existing trajectory
+            if (usvTrajectory) {
+                map.removeLayer(usvTrajectory);
+            }
+            
+            // Draw trajectory with filtered data
+            const trajectoryPoints = filteredData.map(p => [p.lat, p.lon]);
+            usvTrajectory = L.polyline(trajectoryPoints, {
+                color: '#007bff',
+                weight: 3,
+                opacity: 0.7
+            }).addTo(map);
+            
+            // Update map bounds if range is selected
+            if (timeRange.start !== null && timeRange.end !== null) {
+                map.fitBounds([
+                    [minLat, minLon],
+                    [maxLat, maxLon]
+                ], { padding: [20, 20] });
+            }
+            
+            console.log(`Map updated with ${filteredData.length} position points`);
+        }
+        
+        // Update map trajectory based on time range
+        function updateMapTrajectory() {
+            if (!map) return;
+            
+            const filteredData = getFilteredPositionData();
+            
+            if (filteredData.length === 0) {
+                if (usvTrajectory) {
+                    map.removeLayer(usvTrajectory);
+                    usvTrajectory = null;
+                }
+                return;
+            }
+            
+            // Remove existing trajectory
+            if (usvTrajectory) {
+                map.removeLayer(usvTrajectory);
+            }
+            
+            // Draw new trajectory
+            const trajectoryPoints = filteredData.map(p => [p.lat, p.lon]);
+            usvTrajectory = L.polyline(trajectoryPoints, {
+                color: '#007bff',
+                weight: 3,
+                opacity: 0.7
+            }).addTo(map);
+            
+            // Update bounds
+            const lats = filteredData.map(p => p.lat);
+            const lons = filteredData.map(p => p.lon);
+            const minLat = Math.min(...lats);
+            const maxLat = Math.max(...lats);
+            const minLon = Math.min(...lons);
+            const maxLon = Math.max(...lons);
+            
+            map.fitBounds([
+                [minLat, minLon],
+                [maxLat, maxLon]
+            ], { padding: [20, 20] });
+        }
+        
+        // Update map marker based on selected time
+        function updateMapMarker() {
+            if (!map || selectedTime === null) return;
+            
+            // Get filtered position data (respects time range selection)
+            const filteredData = getFilteredPositionData();
+            if (filteredData.length === 0) {
+                // Remove marker if no data
+                if (usvMarker) {
+                    usvMarker.remove();
+                    usvMarker = null;
+                    window.usvMarker = usvMarker;
+                }
+                return;
+            }
+            
+            // Find closest position to selected time
+            const selectedTimeMs = selectedTime;
+            let closestPoint = null;
+            let minDiff = Infinity;
+            
+            filteredData.forEach(point => {
+                const pointTime = new Date(point.time).getTime();
+                const diff = Math.abs(pointTime - selectedTimeMs);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closestPoint = point;
+                }
+            });
+            
+            if (closestPoint) {
+                // Remove existing marker
+                if (usvMarker) {
+                    usvMarker.remove();
+                }
+                
+                // Add new marker
+                usvMarker = L.circleMarker([closestPoint.lat, closestPoint.lon], {
+                    radius: 8,
+                    fillColor: '#dc3545',
+                    color: '#fff',
+                    weight: 2,
+                    fillOpacity: 1
+                }).addTo(map);
+                window.usvMarker = usvMarker;
+            }
+        }
+        
+        // Helper function to get altitude visibility
+        function getAltitudeVisibility(altType) {
+            switch(altType) {
+                case 'Altitude OA filt': return showAltitudeOAFilt;
+                case 'Altitude Kogger': return showAltitudeKogger;
+                case 'Altitude Kogger raw': return showAltitudeKoggerRaw;
+                case 'Altitude OA': return showAltitudeOA;
+                default: return false;
+            }
+        }
+        
+        // Helper function to get motor visibility
+        function getMotorVisibility(motorType) {
+            switch(motorType) {
+                case 'M1': return showM1;
+                case 'M2': return showM2;
+                case 'M3': return showM3;
+                case 'M4': return showM4;
+                case 'M5': return showM5;
+                case 'M6': return showM6;
+                case 'M7': return showM7;
+                case 'M8': return showM8;
+                default: return false;
+            }
+        }
+        
+        // Depth chart mode radio buttons
+        document.querySelectorAll('input[name="depth-mode"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                depthChartMode = e.target.value;
+                drawDepthChart();
+            });
+        });
+        
+        // Motor visibility event listeners
+        // Attach event listeners to motor checkboxes
+        document.getElementById('show-m1').addEventListener('change', (e) => {
+            showM1 = e.target.checked;
+            drawMotorsChart();
+        });
+        
+        document.getElementById('show-m2').addEventListener('change', (e) => {
+            showM2 = e.target.checked;
+            drawMotorsChart();
+        });
+        
+        document.getElementById('show-m3').addEventListener('change', (e) => {
+            showM3 = e.target.checked;
+            drawMotorsChart();
+        });
+        
+        document.getElementById('show-m4').addEventListener('change', (e) => {
+            showM4 = e.target.checked;
+            drawMotorsChart();
+        });
+        
+        document.getElementById('show-m5').addEventListener('change', (e) => {
+            showM5 = e.target.checked;
+            drawMotorsChart();
+        });
+        
+        document.getElementById('show-m6').addEventListener('change', (e) => {
+            showM6 = e.target.checked;
+            drawMotorsChart();
+        });
+        
+        document.getElementById('show-m7').addEventListener('change', (e) => {
+            showM7 = e.target.checked;
+            drawMotorsChart();
+        });
+        
+        document.getElementById('show-m8').addEventListener('change', (e) => {
+            showM8 = e.target.checked;
+            drawMotorsChart();
+            calculateDerivedData();
+            drawDerivedChart();
+        });
+        
+        // Derived curve visibility event listeners
+        document.getElementById('show-avant').addEventListener('change', (e) => {
+            showAvant = e.target.checked;
+            drawDerivedChart();
+        });
+        
+        document.getElementById('show-yaw').addEventListener('change', (e) => {
+            showYaw = e.target.checked;
+            drawDerivedChart();
+        });
+        
+        document.getElementById('show-up').addEventListener('change', (e) => {
+            showUp = e.target.checked;
+            drawDerivedChart();
+        });
+        
+        // Initialize display range with run times immediately
+        if (runStartTime && runEndTime) {
+            displayStartTime = runStartTime.getTime();
+            displayEndTime = runEndTime.getTime();
+            window.displayStartTime = displayStartTime;
+            window.displayEndTime = displayEndTime;
+            updateTimeRangeDisplay();
+        }
+        
+        // Load all data (in sequence to ensure proper initialization)
+        async function loadAllData() {
+            await loadDepthData(); // This will initialize displayStartTime/displayEndTime if not set
+            await loadAltitudeData();
+            await loadMotorData();
+            await loadStateData();
+            await loadUSVStateData();
+            await loadUSVOrderData();
+            await loadUSVPositionData();
+            
+            // Ensure state chart is drawn after all data is loaded
+            if (displayStartTime !== null && displayEndTime !== null) {
+                drawStateChart();
+            }
+        }
+        
+        loadAllData();
+    </script>
+</body>
+</html>
+
