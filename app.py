@@ -426,7 +426,7 @@ def get_run_altitude(run_id):
     
     try:
         # Get all altitude data types for this run
-        altitude_types = ['Altitude OA filt', 'Altitude Kogger', 'Altitude Kogger raw', 'Altitude OA']
+        altitude_types = ['Altitude OA filt', 'Altitude Kogger', 'Altitude Kogger raw', 'Altitude OA', 'Target_altitude']
         
         # Build query to get all altitude data
         placeholders = ','.join(['%s'] * len(altitude_types))
@@ -453,7 +453,7 @@ def get_run_altitude(run_id):
             
             entry = {
                 'time': row['time'].isoformat() if row['time'] else None,
-                'altitude': row['altitude']
+                'value': row['altitude']  # Use 'value' for consistency with other endpoints
             }
             result[data_type].append(entry)
         
@@ -532,6 +532,41 @@ def get_run_state(run_id):
         # Convert to list with ISO timestamps
         result = []
         for row in state_data:
+            entry = dict(row)
+            if entry['time']:
+                entry['time'] = entry['time'].isoformat()
+            result.append(entry)
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/bearing_ping')
+def get_run_bearing_ping(run_id):
+    """API endpoint to get BearingPing data for a specific AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Get BearingPing data for this run
+        query = """
+            SELECT 
+                le.time,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.log_file_id = %s
+              AND dtc.data_type = 'BearingPing'
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, (run_id,))
+        bearing_ping_data = cursor.fetchall()
+        
+        # Convert to list with ISO timestamps
+        result = []
+        for row in bearing_ping_data:
             entry = dict(row)
             if entry['time']:
                 entry['time'] = entry['time'].isoformat()
@@ -811,6 +846,129 @@ def get_run_usv_state(run_id):
         
         return jsonify(result)
         
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/orientation')
+def get_run_orientation(run_id):
+    """API endpoint to get Roll, Pitch, Yaw, and Heading data for a specific AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Get all orientation data types for this run
+        orientation_types = ['Roll', 'Pitch', 'Yaw', 'Heading']
+        
+        # Build query to get all orientation data
+        placeholders = ','.join(['%s'] * len(orientation_types))
+        query = f"""
+            SELECT 
+                le.time,
+                dtc.data_type,
+                le.value as orientation_value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.log_file_id = %s
+              AND dtc.data_type IN ({placeholders})
+            ORDER BY le.time ASC, dtc.data_type ASC
+        """
+        cursor.execute(query, [run_id] + orientation_types)
+        orientation_data = cursor.fetchall()
+        
+        # Group by data type (like motors API)
+        result = {}
+        for row in orientation_data:
+            data_type = row['data_type']
+            if data_type not in result:
+                result[data_type] = []
+            
+            entry = {
+                'time': row['time'].isoformat() if row['time'] else None,
+                'value': row['orientation_value']
+            }
+            result[data_type].append(entry)
+        
+        return jsonify(result)
+
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/water_temp')
+def get_run_water_temp(run_id):
+    """API endpoint to get water temperature data for a specific AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Try to find water temperature data type (may have different names)
+        temp_query = """
+            SELECT DISTINCT dtc.data_type
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.log_file_id = %s
+              AND (dtc.data_type ILIKE '%%water%%temp%%' 
+                   OR dtc.data_type ILIKE '%%temp%%water%%'
+                   OR dtc.data_type ILIKE '%%eau%%temp%%'
+                   OR dtc.data_type ILIKE '%%temp%%eau%%')
+            LIMIT 5
+        """
+        cursor.execute(temp_query, (run_id,))
+        temp_types = [row['data_type'] for row in cursor.fetchall()]
+        
+        # If no water-specific temperature found, try to find any temperature that might be water temp
+        if not temp_types:
+            temp_query2 = """
+                SELECT DISTINCT dtc.data_type
+                FROM log_entries le
+                JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+                WHERE le.log_file_id = %s
+                  AND (dtc.data_type ILIKE '%%temp%%' OR dtc.data_type ILIKE '%%Temp%%')
+                LIMIT 5
+            """
+            cursor.execute(temp_query2, (run_id,))
+            temp_types = [row['data_type'] for row in cursor.fetchall()]
+            # Take the first one as water temperature (if multiple, user can adjust)
+            if temp_types:
+                temp_types = [temp_types[0]]
+        
+        if not temp_types:
+            return jsonify([])
+        
+        # Build query to get water temperature data
+        # Use proper parameterization for IN clause
+        placeholders = ','.join(['%s'] * len(temp_types))
+        query = f"""
+            SELECT 
+                le.time,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.log_file_id = %s
+              AND dtc.data_type IN ({placeholders})
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, [run_id] + temp_types)
+        temp_data = cursor.fetchall()
+        
+        # Format as array of {time, value} objects
+        result = []
+        for row in temp_data:
+            entry = {
+                'time': row['time'].isoformat() if row['time'] else None,
+                'value': row['value']
+            }
+            result.append(entry)
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        print(f"Error in get_run_water_temp for run {run_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
     finally:
         cursor.close()
         conn.close()
