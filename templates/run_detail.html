@@ -683,6 +683,16 @@
         let displayStartTime = null; // First timestamp of AUV log
         let displayEndTime = null;   // Last timestamp of AUV log
         
+        // Y-axis zoom ranges per chart (null = auto, {min, max} = zoomed)
+        let depthYRange = null;
+        let motorsYRange = null;
+        let derivedYRange = null;
+        let stateYRange = null;
+        let bearingPingYRange = null;
+        let orientationYRange = null;
+        let waterTempYRange = null;
+        let altitudeYRange = null;
+        
         // Filtered data (based on displayStartTime and displayEndTime)
         let depthData = [];
         let motorData = {};
@@ -698,6 +708,14 @@
         let timeRange = { start: null, end: null }; // Selected time range for zoom (temporary, used to set displayStartTime/displayEndTime)
         let isSelecting = false;
         let selectionStart = null;
+        
+        // Drag/pan system variables
+        let isDragging = false;           // True when dragging a selection box
+        let dragStart = null;            // {x, y, time, value} at drag start
+        let dragCurrent = null;          // {x, y, time, value} at current mouse position
+        let currentDraggingChart = null; // Chart ID where dragging is happening
+        let isRightClickDragging = false; // True when right-click dragging (pan)
+        let panStart = null;             // {x, time} at pan start
         
         // Expose variables to window for testing
         window.displayStartTime = displayStartTime;
@@ -1149,15 +1167,23 @@
         
         // Draw time labels on X axis
         function drawTimeLabels(ctx, padding, chartWidth, chartHeight, minTime, maxTime, timeSteps) {
-            ctx.textAlign = 'center';
             ctx.fillStyle = '#666';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'right';
             const timeSpan = maxTime - minTime;
+            
             for (let i = 0; i <= timeSteps; i++) {
                 const time = minTime + (timeSpan * i / timeSteps);
                 const x = padding.left + (chartWidth * i / timeSteps);
                 const date = new Date(time);
                 const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                ctx.fillText(timeStr, x, padding.top + chartHeight + 20);
+                
+                // Save context and rotate for vertical text
+                ctx.save();
+                ctx.translate(x, padding.top + chartHeight + 15);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillText(timeStr, 0, 0);
+                ctx.restore();
             }
         }
         
@@ -1462,11 +1488,17 @@
                 return;
             }
             
-            // Calculate value range using utility function
-            const { min: minValue, max: maxValue } = calculateMinMax(allMotorValues);
-            // Round values (allow negative values)
-            const adjustedMinValue = Math.floor(minValue);
-            const adjustedMaxValue = Math.ceil(maxValue);
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinValue, adjustedMaxValue;
+            if (motorsYRange) {
+                adjustedMinValue = motorsYRange.min;
+                adjustedMaxValue = motorsYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(allMotorValues);
+                // Round values (allow negative values)
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
             
             // Draw axes
             motorsCtx.strokeStyle = '#333';
@@ -1581,6 +1613,9 @@
             
             // Update cursor line
             updateCursorLine(motorsCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(motorsCtx, 'motors', padding);
         }
         
         // Draw derived chart
@@ -1763,6 +1798,9 @@
             
             // Update cursor line
             updateCursorLine(derivedCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(derivedCtx, 'derived', padding);
         }
         
         // Draw state chart with 3 curves (AUV StateNb, USV StateNb, USV Order to AUV)
@@ -1987,6 +2025,9 @@
             
             // Update cursor line
             updateCursorLine(stateCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(stateCtx, 'state', padding);
         }
         
         // Draw bearing ping chart
@@ -2041,20 +2082,25 @@
                 return;
             }
             
-            // Calculate value range using utility function
-            const { min: minValue, max: maxValue } = calculateMinMax(allValues);
-            
-            // Adjust range to include 0 if values can be negative, or use 0-360 for angles
+            // Calculate value range - use stored range if available, otherwise calculate
             let adjustedMinValue, adjustedMaxValue;
-            if (minValue >= 0 && maxValue <= 360) {
-                adjustedMinValue = 0;
-                adjustedMaxValue = 360;
-            } else if (minValue >= -180 && maxValue <= 180) {
-                adjustedMinValue = -180;
-                adjustedMaxValue = 180;
+            if (bearingPingYRange) {
+                adjustedMinValue = bearingPingYRange.min;
+                adjustedMaxValue = bearingPingYRange.max;
             } else {
-                adjustedMinValue = Math.floor(minValue);
-                adjustedMaxValue = Math.ceil(maxValue);
+                const { min: minValue, max: maxValue } = calculateMinMax(allValues);
+                
+                // Adjust range to include 0 if values can be negative, or use 0-360 for angles
+                if (minValue >= 0 && maxValue <= 360) {
+                    adjustedMinValue = 0;
+                    adjustedMaxValue = 360;
+                } else if (minValue >= -180 && maxValue <= 180) {
+                    adjustedMinValue = -180;
+                    adjustedMaxValue = 180;
+                } else {
+                    adjustedMinValue = Math.floor(minValue);
+                    adjustedMaxValue = Math.ceil(maxValue);
+                }
             }
             
             // Draw axes using utility function
@@ -2085,6 +2131,9 @@
             
             // Update cursor line
             updateCursorLine(bearingPingCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(bearingPingCtx, 'bearingPing', padding);
         }
         
         // Draw orientation chart
@@ -2153,10 +2202,16 @@
                 return;
             }
             
-            // Calculate value range using utility function
-            const { min: minValue, max: maxValue } = calculateMinMax(allValues);
-            const adjustedMinValue = Math.floor(minValue);
-            const adjustedMaxValue = Math.ceil(maxValue);
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinValue, adjustedMaxValue;
+            if (orientationYRange) {
+                adjustedMinValue = orientationYRange.min;
+                adjustedMaxValue = orientationYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(allValues);
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
             
             // Draw axes using utility function
             drawChartAxes(orientationCtx, padding, chartWidth, chartHeight);
@@ -2206,6 +2261,9 @@
             
             // Update cursor line
             updateCursorLine(orientationCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(orientationCtx, 'orientation', padding);
         }
         
         // Draw water temperature chart
@@ -2261,10 +2319,16 @@
                 return;
             }
             
-            // Calculate value range using utility function
-            const { min: minValue, max: maxValue } = calculateMinMax(values);
-            const adjustedMinValue = Math.floor(minValue);
-            const adjustedMaxValue = Math.ceil(maxValue);
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinValue, adjustedMaxValue;
+            if (waterTempYRange) {
+                adjustedMinValue = waterTempYRange.min;
+                adjustedMaxValue = waterTempYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(values);
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
             
             // Draw axes using utility function
             drawChartAxes(waterTempCtx, padding, chartWidth, chartHeight);
@@ -2282,6 +2346,9 @@
             
             // Update cursor line
             updateCursorLine(waterTempCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(waterTempCtx, 'waterTemp', padding);
         }
         
         // Draw altitude chart
@@ -2353,10 +2420,16 @@
                 return;
             }
             
-            // Calculate value range using utility function
-            const { min: minValue, max: maxValue } = calculateMinMax(allValues);
-            const adjustedMinValue = Math.floor(minValue);
-            const adjustedMaxValue = Math.ceil(maxValue);
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinValue, adjustedMaxValue;
+            if (altitudeYRange) {
+                adjustedMinValue = altitudeYRange.min;
+                adjustedMaxValue = altitudeYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(allValues);
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
             
             // Draw axes using utility function
             drawChartAxes(altitudeCtx, padding, chartWidth, chartHeight);
@@ -2396,6 +2469,9 @@
             
             // Update cursor line
             updateCursorLine(altitudeCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(altitudeCtx, 'altitude', padding);
         }
         
         // Helper function to get altitude visibility
@@ -2968,6 +3044,9 @@
             } else {
                 timeRangeDisplay.classList.remove('active');
             }
+            
+            // Draw selection box if dragging
+            drawSelectionBox(ctx, 'depth', padding);
         }
         
         // Get current visible time range (accounting for zoom)
@@ -3008,6 +3087,132 @@
         
         // Expose waitingForSecondClick to window for testing
         window.waitingForSecondClick = waitingForSecondClick;
+        
+        // Helper function to convert Y coordinate to value
+        function getValueFromYForCanvas(containerEl, y, minValue, maxValue) {
+            const rect = containerEl.getBoundingClientRect();
+            const padding = {top: 40, right: 20, bottom: 40, left: 60};
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (y < padding.top || y > padding.top + chartHeight) return null;
+            
+            const yRatio = (y - padding.top) / chartHeight;
+            const value = maxValue - (yRatio * (maxValue - minValue));
+            return value;
+        }
+        
+        // Helper function to get current value range for a chart
+        function getCurrentValueRange(chartId) {
+            // Return stored range if available, otherwise calculate from data
+            let minValue = 0, maxValue = 100; // Default
+            
+            switch(chartId) {
+                case 'depth':
+                    if (depthYRange) return depthYRange;
+                    const depthValues = depthData.map(d => d.depth || 0);
+                    if (depthValues.length > 0) {
+                        const {min, max} = calculateMinMax(depthValues);
+                        minValue = Math.floor(Math.min(0, min));
+                        maxValue = Math.ceil(Math.max(0, max));
+                    }
+                    break;
+                case 'motors':
+                    if (motorsYRange) return motorsYRange;
+                    let allMotorValues = [];
+                    Object.keys(motorData).forEach(motorType => {
+                        if (getMotorVisibility(motorType)) {
+                            allMotorValues = allMotorValues.concat((motorData[motorType] || []).map(d => (d.value || 0) - 1500));
+                        }
+                    });
+                    if (allMotorValues.length > 0) {
+                        const {min, max} = calculateMinMax(allMotorValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
+                case 'derived':
+                    if (derivedYRange) return derivedYRange;
+                    minValue = -100;
+                    maxValue = 100;
+                    break;
+                case 'bearingPing':
+                    if (bearingPingYRange) return bearingPingYRange;
+                    const bearingValues = bearingPingData.map(d => d.value || 0);
+                    if (bearingValues.length > 0) {
+                        const {min, max} = calculateMinMax(bearingValues);
+                        minValue = 0;
+                        maxValue = 360;
+                    }
+                    break;
+                case 'orientation':
+                    if (orientationYRange) return orientationYRange;
+                    let allOrientationValues = [];
+                    ['Roll', 'Pitch', 'Yaw', 'Heading'].forEach(key => {
+                        if (orientationData[key]) {
+                            allOrientationValues = allOrientationValues.concat(orientationData[key].map(d => d.value).filter(v => v !== null && v !== undefined));
+                        }
+                    });
+                    if (allOrientationValues.length > 0) {
+                        const {min, max} = calculateMinMax(allOrientationValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
+                case 'waterTemp':
+                    if (waterTempYRange) return waterTempYRange;
+                    const tempValues = waterTempData.map(d => d.value || 0);
+                    if (tempValues.length > 0) {
+                        const {min, max} = calculateMinMax(tempValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
+                case 'altitude':
+                    if (altitudeYRange) return altitudeYRange;
+                    let allAltitudeValues = [];
+                    Object.keys(altitudeData).forEach(key => {
+                        if (getAltitudeVisibility(key) && altitudeData[key]) {
+                            allAltitudeValues = allAltitudeValues.concat(altitudeData[key].map(d => d.value).filter(v => v !== null && v !== undefined));
+                        }
+                    });
+                    if (allAltitudeValues.length > 0) {
+                        const {min, max} = calculateMinMax(allAltitudeValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
+            }
+            
+            return {min: minValue, max: maxValue};
+        }
+        
+        // Helper function to draw a specific chart by ID
+        function drawChartById(chartId) {
+            switch(chartId) {
+                case 'depth': drawDepthChart(); break;
+                case 'motors': drawMotorsChart(); break;
+                case 'derived': drawDerivedChart(); break;
+                case 'state': drawStateChart(); break;
+                case 'bearingPing': drawBearingPingChart(); break;
+                case 'orientation': drawOrientationChart(); break;
+                case 'waterTemp': drawWaterTempChart(); break;
+                case 'altitude': drawAltitudeChart(); break;
+            }
+        }
+        
+        // Helper function to draw all charts
+        function drawAllCharts() {
+            drawDepthChart();
+            drawMotorsChart();
+            drawDerivedChart();
+            drawStateChart();
+            drawBearingPingChart();
+            drawOrientationChart();
+            drawWaterTempChart();
+            drawAltitudeChart();
+            updateMapTrajectory();
+            updateStatistics();
+        }
         
         // Helper function to get time from X coordinate (generic for any canvas)
         function getTimeFromXForCanvas(containerEl, x) {
@@ -3062,6 +3267,148 @@
             } else {
                 cursorLineEl.style.display = 'none';
             }
+        }
+        
+        // Generic function to draw selection box if dragging
+        function drawSelectionBox(ctx, chartId, padding) {
+            if (isDragging && currentDraggingChart === chartId && dragStart && dragCurrent) {
+                const startX = Math.min(dragStart.x, dragCurrent.x);
+                const endX = Math.max(dragStart.x, dragCurrent.x);
+                const startY = Math.min(dragStart.y, dragCurrent.y);
+                const endY = Math.max(dragStart.y, dragCurrent.y);
+                
+                // Draw semi-transparent fill
+                ctx.fillStyle = 'rgba(0, 123, 255, 0.1)';
+                ctx.fillRect(startX, startY, endX - startX, endY - startY);
+                
+                // Draw border
+                ctx.strokeStyle = '#007bff';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(startX, startY, endX - startX, endY - startY);
+                ctx.setLineDash([]);
+            }
+        }
+        
+        // Zoom and pan functions
+        function applyTimeZoom(startTime, endTime) {
+            // Mettre à jour displayStartTime et displayEndTime
+            displayStartTime = Math.min(startTime, endTime);
+            displayEndTime = Math.max(startTime, endTime);
+            window.displayStartTime = displayStartTime;
+            window.displayEndTime = displayEndTime;
+            
+            // Filtrer toutes les données
+            filterDataByDisplayRange();
+            
+            // Redessiner tous les graphiques
+            drawAllCharts();
+            updateTimeRangeDisplay();
+        }
+        
+        function applyValueZoom(chartId, minValue, maxValue) {
+            // Déterminer quelle variable YRange mettre à jour
+            switch(chartId) {
+                case 'depth': depthYRange = {min: minValue, max: maxValue}; break;
+                case 'motors': motorsYRange = {min: minValue, max: maxValue}; break;
+                case 'derived': derivedYRange = {min: minValue, max: maxValue}; break;
+                case 'state': stateYRange = {min: minValue, max: maxValue}; break;
+                case 'bearingPing': bearingPingYRange = {min: minValue, max: maxValue}; break;
+                case 'orientation': orientationYRange = {min: minValue, max: maxValue}; break;
+                case 'waterTemp': waterTempYRange = {min: minValue, max: maxValue}; break;
+                case 'altitude': altitudeYRange = {min: minValue, max: maxValue}; break;
+            }
+            
+            // Redessiner uniquement ce graphique
+            drawChartById(chartId);
+        }
+        
+        function resetZoom(resetTime = true, resetValue = true, chartId = null) {
+            if (resetTime) {
+                // Reset time zoom (tous les graphiques)
+                displayStartTime = null;
+                displayEndTime = null;
+                window.displayStartTime = displayStartTime;
+                window.displayEndTime = displayEndTime;
+                
+                // Réinitialiser avec les données complètes
+                if (depthDataFull.length > 0) {
+                    const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
+                    let minTime = Infinity;
+                    let maxTime = -Infinity;
+                    for (let i = 0; i < allTimes.length; i++) {
+                        if (allTimes[i] < minTime) minTime = allTimes[i];
+                        if (allTimes[i] > maxTime) maxTime = allTimes[i];
+                    }
+                    displayStartTime = minTime;
+                    displayEndTime = maxTime;
+                    window.displayStartTime = displayStartTime;
+                    window.displayEndTime = displayEndTime;
+                }
+                
+                filterDataByDisplayRange();
+            }
+            
+            if (resetValue) {
+                // Reset value zoom
+                if (chartId) {
+                    // Reset un seul graphique
+                    switch(chartId) {
+                        case 'depth': depthYRange = null; break;
+                        case 'motors': motorsYRange = null; break;
+                        case 'derived': derivedYRange = null; break;
+                        case 'state': stateYRange = null; break;
+                        case 'bearingPing': bearingPingYRange = null; break;
+                        case 'orientation': orientationYRange = null; break;
+                        case 'waterTemp': waterTempYRange = null; break;
+                        case 'altitude': altitudeYRange = null; break;
+                    }
+                } else {
+                    // Reset tous les graphiques
+                    depthYRange = null;
+                    motorsYRange = null;
+                    derivedYRange = null;
+                    stateYRange = null;
+                    bearingPingYRange = null;
+                    orientationYRange = null;
+                    waterTempYRange = null;
+                    altitudeYRange = null;
+                }
+            }
+            
+            drawAllCharts();
+            updateTimeRangeDisplay();
+        }
+        
+        function applyPan(timeDelta) {
+            if (!displayStartTime || !displayEndTime) return;
+            
+            const currentSpan = displayEndTime - displayStartTime;
+            const newStart = displayStartTime + timeDelta;
+            const newEnd = newStart + currentSpan;
+            
+            // Vérifier les limites (ne pas dépasser les données disponibles)
+            const fullTimeRange = getVisibleTimeRange();
+            const fullStartTime = fullTimeRange.min;
+            const fullEndTime = fullTimeRange.max;
+            
+            if (newStart < fullStartTime) {
+                displayStartTime = fullStartTime;
+                displayEndTime = displayStartTime + currentSpan;
+            } else if (newEnd > fullEndTime) {
+                displayEndTime = fullEndTime;
+                displayStartTime = displayEndTime - currentSpan;
+            } else {
+                displayStartTime = newStart;
+                displayEndTime = newEnd;
+            }
+            
+            window.displayStartTime = displayStartTime;
+            window.displayEndTime = displayEndTime;
+            
+            filterDataByDisplayRange();
+            drawAllCharts();
+            updateTimeRangeDisplay();
         }
         
         // Shared zoom handlers for all charts
@@ -3271,47 +3618,118 @@
         }
         
         // Helper function to attach zoom event listeners to any canvas
-        function attachZoomListeners(canvasEl, containerEl) {
+        function attachZoomListeners(canvasEl, containerEl, chartId) {
             if (!canvasEl || !containerEl) return;
             
-            canvasEl.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
+            // Mousedown: start drag or pan
+            canvasEl.addEventListener('mousedown', (e) => {
                 const rect = canvasEl.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 
-                handleZoomClick(containerEl, x, y);
+                if (e.button === 0) { // Left click
+                    // Start selection box
+                    isDragging = true;
+                    currentDraggingChart = chartId;
+                    dragStart = {x, y, time: getTimeFromXForCanvas(containerEl, x)};
+                    dragCurrent = {x, y};
+                    e.preventDefault();
+                } else if (e.button === 2) { // Right click
+                    // Start pan
+                    isRightClickDragging = true;
+                    panStart = {x, time: getTimeFromXForCanvas(containerEl, x)};
+                    e.preventDefault();
+                }
             });
             
+            // Mousemove: update drag or pan
             canvasEl.addEventListener('mousemove', (e) => {
                 const rect = canvasEl.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 
-                handleZoomMouseMove(containerEl, x, y);
+                if (isDragging) {
+                    dragCurrent = {x, y};
+                    drawChartById(chartId); // Redraw to show selection box
+                } else if (isRightClickDragging && panStart) {
+                    const currentTime = getTimeFromXForCanvas(containerEl, x);
+                    if (currentTime && panStart.time) {
+                        const timeDelta = (panStart.time - currentTime);
+                        applyPan(timeDelta);
+                        panStart.time = currentTime; // Update for next move
+                    }
+                } else {
+                    // Normal hover (cursor line)
+                    handleZoomMouseMove(containerEl, x, y);
+                }
             });
             
-            canvasEl.addEventListener('mouseleave', (e) => {
-                handleZoomMouseLeave();
+            // Mouseup: apply zoom or finish pan
+            canvasEl.addEventListener('mouseup', (e) => {
+                if (e.button === 0 && isDragging) {
+                    // Apply zoom
+                    if (dragStart && dragCurrent) {
+                        const startTime = getTimeFromXForCanvas(containerEl, Math.min(dragStart.x, dragCurrent.x));
+                        const endTime = getTimeFromXForCanvas(containerEl, Math.max(dragStart.x, dragCurrent.x));
+                        
+                        // Time zoom (always)
+                        if (startTime && endTime && Math.abs(endTime - startTime) > 100) {
+                            applyTimeZoom(startTime, endTime);
+                        }
+                        
+                        // Value zoom (if Y range is significant)
+                        const minY = Math.min(dragStart.y, dragCurrent.y);
+                        const maxY = Math.max(dragStart.y, dragCurrent.y);
+                        if (Math.abs(maxY - minY) > 10) { // At least 10 pixels
+                            // Get current value range for this chart
+                            const {min: minValue, max: maxValue} = getCurrentValueRange(chartId);
+                            const startValue = getValueFromYForCanvas(containerEl, maxY, minValue, maxValue);
+                            const endValue = getValueFromYForCanvas(containerEl, minY, minValue, maxValue);
+                            
+                            if (startValue !== null && endValue !== null && Math.abs(endValue - startValue) > 0.01) {
+                                applyValueZoom(chartId, Math.min(startValue, endValue), Math.max(startValue, endValue));
+                            }
+                        }
+                    }
+                    
+                    isDragging = false;
+                    dragStart = null;
+                    dragCurrent = null;
+                    currentDraggingChart = null;
+                    drawAllCharts();
+                } else if (e.button === 2 && isRightClickDragging) {
+                    // Finish pan
+                    isRightClickDragging = false;
+                    panStart = null;
+                }
             });
             
+            // Context menu: reset zoom
             canvasEl.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                handleZoomContextMenu();
+                if (!isRightClickDragging) {
+                    // Simple right click (not drag) = reset zoom
+                    resetZoom(true, true, chartId);
+                }
+            });
+            
+            // Mouseleave: clear hover
+            canvasEl.addEventListener('mouseleave', () => {
+                if (!isDragging && !isRightClickDragging) {
+                    handleZoomMouseLeave();
+                }
             });
         }
         
         // Attach zoom listeners to all charts
-        attachZoomListeners(canvas, container);
-        attachZoomListeners(motorsCanvas, motorsContainer);
-        attachZoomListeners(derivedCanvas, derivedContainer);
-        attachZoomListeners(stateCanvas, stateContainer);
-        attachZoomListeners(bearingPingCanvas, bearingPingContainer);
-        attachZoomListeners(orientationCanvas, orientationContainer);
-        attachZoomListeners(waterTempCanvas, waterTempContainer);
-        attachZoomListeners(altitudeCanvas, altitudeContainer);
+        attachZoomListeners(canvas, container, 'depth');
+        attachZoomListeners(motorsCanvas, motorsContainer, 'motors');
+        attachZoomListeners(derivedCanvas, derivedContainer, 'derived');
+        attachZoomListeners(stateCanvas, stateContainer, 'state');
+        attachZoomListeners(bearingPingCanvas, bearingPingContainer, 'bearingPing');
+        attachZoomListeners(orientationCanvas, orientationContainer, 'orientation');
+        attachZoomListeners(waterTempCanvas, waterTempContainer, 'waterTemp');
+        attachZoomListeners(altitudeCanvas, altitudeContainer, 'altitude');
         
         // Filter data based on displayStartTime and displayEndTime
         function filterDataByDisplayRange() {
