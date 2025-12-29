@@ -3,16 +3,28 @@
 Flask web application for visualizing log data.
 """
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 from dotenv import load_dotenv
+from pathlib import Path
+import tempfile
+import shutil
+import sys
+import threading
+import uuid
+import json
+import time
 
 load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
+
+# Store import status in memory (in production, use Redis or similar)
+import_status = {}
+import_status_lock = threading.Lock()
 
 def get_db_connection():
     """Get database connection."""
@@ -972,6 +984,290 @@ def get_run_water_temp(run_id):
     finally:
         cursor.close()
         conn.close()
+
+@app.route('/api/import', methods=['POST'])
+def import_data():
+    """API endpoint to import log files from uploaded directory."""
+    try:
+        if 'files' not in request.files:
+            return jsonify({'status': 'error', 'message': 'Aucun fichier fourni'}), 400
+        
+        files = request.files.getlist('files')
+        if not files or all(f.filename == '' for f in files):
+            return jsonify({'status': 'error', 'message': 'Aucun fichier sélectionné'}), 400
+        
+        # Filter only CSV files
+        csv_files = [f for f in files if f.filename.endswith('.csv')]
+        if not csv_files:
+            return jsonify({'status': 'error', 'message': 'Aucun fichier CSV trouvé'}), 400
+        
+        # Generate unique import ID
+        import_id = str(uuid.uuid4())
+        
+        # Create temporary directory structure
+        temp_dir = tempfile.mkdtemp()
+        
+        # Save all files to temp directory BEFORE starting the thread
+        # This is critical because Flask file objects are closed after the request ends
+        try:
+            for file in csv_files:
+                rel_path = file.filename
+                full_path = Path(temp_dir) / rel_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                file.save(str(full_path))
+        except Exception as e:
+            # Clean up temp directory if file saving fails
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return jsonify({'status': 'error', 'message': f'Erreur lors de la sauvegarde des fichiers: {str(e)}'}), 500
+        
+        # Start processing in a separate thread (files are already saved)
+        thread = threading.Thread(target=process_import_files, args=(import_id, temp_dir))
+        thread.daemon = True
+        thread.start()
+        
+        # Return immediately with import_id
+        return jsonify({
+            'status': 'started',
+            'import_id': import_id,
+            'message': 'Import démarré'
+        })
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': f'Erreur lors de l\'import: {str(e)}'}), 500
+
+def process_import_files(import_id, temp_dir):
+    """Process files in a separate thread and update status.
+    
+    Note: Files are already saved to temp_dir before this function is called.
+    """
+    global import_status
+    
+    try:
+        with import_status_lock:
+            import_status[import_id] = {
+                'status': 'processing',
+                'current_file': None,
+                'file_index': 0,
+                'total_files': 0,
+                'files_processed': 0,
+                'files_imported': 0,
+                'files_skipped': 0,
+                'current_file_bytes_processed': 0,
+                'current_file_bytes_total': 0,
+                'errors': []
+            }
+        
+        # Import using the existing import_logs module
+        sys.path.insert(0, str(Path(__file__).parent / 'database'))
+        from import_logs import import_navigation_file, import_settings_file, extract_vehicle_info
+        
+        conn = get_db_connection()
+        files_processed = 0
+        files_imported = 0
+        files_skipped = 0
+        errors = []
+        
+        # Use rglob to find all navigation and settings files recursively
+        temp_path = Path(temp_dir)
+        nav_files = list(temp_path.rglob('*navigation*.csv'))
+        settings_files = list(temp_path.rglob('*settings*.csv'))
+        all_files = nav_files + settings_files
+        total_files = len(all_files)
+        
+        with import_status_lock:
+            import_status[import_id]['total_files'] = total_files
+        
+        # Import navigation files
+        for nav_file in nav_files:
+            # Create file_progress dict to track progress for this file
+            file_progress = {'bytes_processed': 0, 'bytes_total': 0, 'estimated_total_lines': None}
+            
+            try:
+                with import_status_lock:
+                    import_status[import_id]['current_file'] = nav_file.name
+                    import_status[import_id]['file_index'] = files_processed + 1
+                    import_status[import_id]['current_file_bytes_processed'] = 0
+                    import_status[import_id]['current_file_bytes_total'] = 0
+                
+                # Start a thread to periodically update import_status with file progress
+                progress_update_active = threading.Event()
+                progress_update_active.set()
+                
+                def update_progress_periodically():
+                    while progress_update_active.is_set():
+                        with import_status_lock:
+                            if import_id in import_status:
+                                import_status[import_id]['current_file_bytes_processed'] = file_progress.get('bytes_processed', 0)
+                                import_status[import_id]['current_file_bytes_total'] = file_progress.get('bytes_total', 0)
+                        time.sleep(0.2)  # Update every 200ms
+                
+                progress_thread = threading.Thread(target=update_progress_periodically, daemon=True)
+                progress_thread.start()
+                
+                result = import_navigation_file(nav_file, conn, file_progress)
+                
+                # Stop progress update thread
+                progress_update_active.clear()
+                progress_thread.join(timeout=0.5)
+                
+                # Final update
+                with import_status_lock:
+                    if import_id in import_status:
+                        import_status[import_id]['current_file_bytes_processed'] = file_progress.get('bytes_processed', 0)
+                        import_status[import_id]['current_file_bytes_total'] = file_progress.get('bytes_total', 0)
+                
+                if result:
+                    files_imported += 1
+                else:
+                    files_skipped += 1
+            except Exception as e:
+                error_msg = f"Error importing {nav_file.name}: {str(e)}"
+                print(error_msg)
+                errors.append(error_msg)
+            finally:
+                files_processed += 1
+                with import_status_lock:
+                    import_status[import_id]['files_processed'] = files_processed
+                    import_status[import_id]['files_imported'] = files_imported
+                    import_status[import_id]['files_skipped'] = files_skipped
+                    import_status[import_id]['current_file_bytes_processed'] = 0
+                    import_status[import_id]['current_file_bytes_total'] = 0
+        
+        # Import settings files (only for AUV)
+        for settings_file in settings_files:
+            try:
+                with import_status_lock:
+                    import_status[import_id]['current_file'] = settings_file.name
+                    import_status[import_id]['file_index'] = files_processed + 1
+                
+                vehicle_type, _ = extract_vehicle_info(settings_file.name)
+                if vehicle_type == 'AUV':
+                    result = import_settings_file(settings_file, conn)
+                    if result:
+                        files_imported += 1
+                    else:
+                        files_skipped += 1
+                else:
+                    print(f"Skipping settings file {settings_file.name} (USV)")
+            except Exception as e:
+                error_msg = f"Error importing {settings_file.name}: {str(e)}"
+                print(error_msg)
+                errors.append(error_msg)
+            finally:
+                files_processed += 1
+                with import_status_lock:
+                    import_status[import_id]['files_processed'] = files_processed
+                    import_status[import_id]['files_imported'] = files_imported
+                    import_status[import_id]['files_skipped'] = files_skipped
+        
+        conn.close()
+        
+        # Build message
+        message_parts = []
+        if files_imported > 0:
+            message_parts.append(f'{files_imported} fichier(s) importé(s)')
+        if files_skipped > 0:
+            message_parts.append(f'{files_skipped} fichier(s) déjà importé(s)')
+        if errors:
+            message_parts.append(f'{len(errors)} erreur(s)')
+        
+        message = ', '.join(message_parts) if message_parts else 'Aucun fichier traité'
+        
+        # Clean up temporary directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        # Update final status
+        with import_status_lock:
+            import_status[import_id].update({
+                'status': 'completed',
+                'current_file': None,
+                'files_processed': files_processed,
+                'files_imported': files_imported,
+                'files_skipped': files_skipped,
+                'message': message,
+                'errors': errors[:5]
+            })
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        with import_status_lock:
+            import_status[import_id].update({
+                'status': 'error',
+                'message': f'Erreur lors de l\'import: {str(e)}'
+            })
+        # Clean up on error
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+@app.route('/api/import/status/<import_id>')
+def import_status_stream(import_id):
+    """SSE endpoint to stream import progress updates."""
+    def generate():
+        global import_status
+        last_file_index = -1
+        last_status_str = None
+        
+        while True:
+            with import_status_lock:
+                status = import_status.get(import_id, None)
+            
+            if status is None:
+                yield f"data: {json.dumps({'error': 'Import ID not found'})}\n\n"
+                break
+            
+            # Create a simple string representation for comparison
+            current_status_str = f"{status['status']}_{status.get('file_index', 0)}_{status.get('files_processed', 0)}"
+            
+            # Send update if status changed
+            if current_status_str != last_status_str:
+                if status['status'] == 'completed':
+                    yield f"event: complete\ndata: {json.dumps(status)}\n\n"
+                    break
+                elif status['status'] == 'error':
+                    yield f"event: error\ndata: {json.dumps(status)}\n\n"
+                    break
+                else:
+                    yield f"event: progress\ndata: {json.dumps(status)}\n\n"
+                last_status_str = current_status_str
+            
+            time.sleep(0.5)  # Poll every 500ms
+        
+        # Clean up after completion
+        with import_status_lock:
+            if import_id in import_status:
+                del import_status[import_id]
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+@app.route('/api/reset', methods=['POST'])
+def reset_database():
+    """API endpoint to reset the database (delete all logs)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent / 'database'))
+        from clear_and_reimport import clear_all_data
+        
+        success = clear_all_data()
+        
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': 'Base de données réinitialisée avec succès'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Erreur lors de la réinitialisation de la base de données'
+            }), 500
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': f'Erreur lors du reset: {str(e)}'
+        }), 500
 
 @app.route('/api/run/<int:run_id>/usv_order')
 def get_run_usv_order(run_id):

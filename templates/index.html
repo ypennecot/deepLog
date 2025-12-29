@@ -36,6 +36,167 @@
             margin-bottom: 30px;
         }
         
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #218838;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 500px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        .modal-body {
+            margin-bottom: 20px;
+            color: #666;
+        }
+        
+        .modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+        }
+        
+        .loading-overlay.active {
+            display: flex;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .progress-container {
+            width: 400px;
+            max-width: 90%;
+            margin-top: 20px;
+        }
+        
+        .progress-bar-wrapper {
+            width: 100%;
+            height: 30px;
+            background-color: rgba(255,255,255,0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        .progress-text {
+            text-align: center;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
         .stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -254,6 +415,16 @@
     <div class="container">
         <h1>DeepLog - Visualisation des données</h1>
         <p class="subtitle">Analyse des logs de navigation USV et AUV</p>
+        
+        <div class="action-buttons">
+            <button id="btn-import" class="btn btn-success">
+                <span>📁</span> Ajouter des données
+            </button>
+            <button id="btn-reset" class="btn btn-danger">
+                <span>🗑️</span> Reset la base de données
+            </button>
+            <input type="file" id="file-input" webkitdirectory directory multiple style="display: none;" accept=".csv">
+        </div>
         
         <div class="tabs">
             <button class="tab active" onclick="switchTab('rows')">Vue en lignes</button>
@@ -1333,6 +1504,286 @@
         document.getElementById('vehicle-filter-runs').addEventListener('change', loadRuns);
         document.getElementById('start-time-filter-runs').addEventListener('change', loadRuns);
         document.getElementById('end-time-filter-runs').addEventListener('change', loadRuns);
+        
+        // Modal for reset confirmation
+        const resetModal = document.createElement('div');
+        resetModal.className = 'modal';
+        resetModal.id = 'reset-modal';
+        resetModal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">⚠️ Confirmer le reset</div>
+                <div class="modal-body">
+                    Êtes-vous sûr de vouloir supprimer toutes les données de la base de données ?<br>
+                    Cette action est irréversible.
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-danger" id="confirm-reset">Oui, supprimer</button>
+                    <button class="btn" style="background: #6c757d; color: white;" id="cancel-reset">Annuler</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(resetModal);
+        
+        // Loading overlay
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.className = 'loading-overlay';
+        loadingOverlay.id = 'loading-overlay';
+        loadingOverlay.innerHTML = `
+            <div class="spinner"></div>
+            <div id="loading-message">Traitement en cours...</div>
+            <div id="current-file" style="margin-top: 10px; font-size: 14px; color: #ccc;"></div>
+            <div class="progress-container">
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar" id="progress-bar">0%</div>
+                </div>
+                <div class="progress-text" id="progress-text">Initialisation...</div>
+            </div>
+            <div class="progress-container" style="margin-top: 15px;">
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar" id="file-progress-bar" style="background: linear-gradient(90deg, #007bff, #0056b3);">0%</div>
+                </div>
+                <div class="progress-text" id="file-progress-text" style="font-size: 12px; color: #aaa;">Fichier en cours...</div>
+            </div>
+        `;
+        document.body.appendChild(loadingOverlay);
+        
+        // Import button handler
+        document.getElementById('btn-import').addEventListener('click', () => {
+            document.getElementById('file-input').click();
+        });
+        
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+            
+            // Filter only CSV files
+            const csvFiles = files.filter(f => f.name.endsWith('.csv'));
+            if (csvFiles.length === 0) {
+                alert('Aucun fichier CSV trouvé dans le dossier sélectionné.');
+                return;
+            }
+            
+            // Show loading overlay
+            const overlay = document.getElementById('loading-overlay');
+            const message = document.getElementById('loading-message');
+            const currentFileEl = document.getElementById('current-file');
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            const fileProgressBar = document.getElementById('file-progress-bar');
+            const fileProgressText = document.getElementById('file-progress-text');
+            
+            message.textContent = `Import de ${csvFiles.length} fichier(s)...`;
+            currentFileEl.textContent = '';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            progressText.textContent = 'Initialisation...';
+            fileProgressBar.style.width = '0%';
+            fileProgressBar.textContent = '0%';
+            fileProgressText.textContent = 'Fichier en cours...';
+            overlay.classList.add('active');
+            
+            // Disable buttons
+            document.getElementById('btn-import').disabled = true;
+            document.getElementById('btn-reset').disabled = true;
+            
+            try {
+                const formData = new FormData();
+                csvFiles.forEach(file => {
+                    // Preserve the relative path structure for recursive search
+                    // The filename already contains the relative path when using webkitdirectory
+                    formData.append('files', file, file.webkitRelativePath || file.name);
+                });
+                
+                const response = await fetch('/api/import', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'started' && result.import_id) {
+                    // Connect to SSE stream for progress updates
+                    const eventSource = new EventSource(`/api/import/status/${result.import_id}`);
+                    
+                    eventSource.addEventListener('progress', (e) => {
+                        const data = JSON.parse(e.data);
+                        
+                        // Update current file
+                        if (data.current_file) {
+                            currentFileEl.textContent = `Fichier en cours : ${data.current_file} (${data.file_index}/${data.total_files})`;
+                        }
+                        
+                        // Update global progress bar
+                        if (data.total_files > 0) {
+                            const progress = Math.round((data.files_processed / data.total_files) * 100);
+                            progressBar.style.width = progress + '%';
+                            progressBar.textContent = progress + '%';
+                            progressText.textContent = `Traitement : ${data.files_processed}/${data.total_files} fichier(s)`;
+                        }
+                        
+                        // Update file progress bar
+                        if (data.current_file_bytes_total > 0) {
+                            const fileProgress = Math.round((data.current_file_bytes_processed / data.current_file_bytes_total) * 100);
+                            fileProgressBar.style.width = fileProgress + '%';
+                            fileProgressBar.textContent = fileProgress + '%';
+                            
+                            // Format bytes to MB
+                            const bytesProcessedMB = (data.current_file_bytes_processed / (1024 * 1024)).toFixed(2);
+                            const bytesTotalMB = (data.current_file_bytes_total / (1024 * 1024)).toFixed(2);
+                            fileProgressText.textContent = `Fichier : ${bytesProcessedMB} MB / ${bytesTotalMB} MB (${fileProgress}%)`;
+                        } else {
+                            fileProgressBar.style.width = '0%';
+                            fileProgressBar.textContent = '0%';
+                            fileProgressText.textContent = 'Fichier en cours...';
+                        }
+                    });
+                    
+                    eventSource.addEventListener('complete', (e) => {
+                        const data = JSON.parse(e.data);
+                        eventSource.close();
+                        
+                        // Update progress to 100%
+                        progressBar.style.width = '100%';
+                        progressBar.textContent = '100%';
+                        fileProgressBar.style.width = '100%';
+                        fileProgressBar.textContent = '100%';
+                        currentFileEl.textContent = '';
+                        fileProgressText.textContent = '';
+                        
+                        // Build progress text with skipped files info
+                        let progressTextMsg = `✅ ${data.files_imported} fichier(s) importé(s)`;
+                        if (data.files_skipped > 0) {
+                            progressTextMsg += `, ${data.files_skipped} déjà importé(s)`;
+                        }
+                        progressTextMsg += ` sur ${data.files_processed} traité(s)`;
+                        progressText.textContent = progressTextMsg;
+                        message.textContent = `✅ ${data.message}`;
+                        
+                        setTimeout(() => {
+                            overlay.classList.remove('active');
+                            location.reload();
+                        }, 2000);
+                    });
+                    
+                    eventSource.addEventListener('error', (e) => {
+                        const data = JSON.parse(e.data);
+                        eventSource.close();
+                        
+                        progressBar.style.width = '100%';
+                        progressBar.style.background = 'linear-gradient(90deg, #dc3545, #c82333)';
+                        progressBar.textContent = 'Erreur';
+                        fileProgressBar.style.width = '0%';
+                        fileProgressBar.textContent = '';
+                        currentFileEl.textContent = '';
+                        fileProgressText.textContent = '';
+                        progressText.textContent = `❌ ${data.message || 'Erreur inconnue'}`;
+                        message.textContent = `❌ Erreur: ${data.message || 'Erreur inconnue'}`;
+                        setTimeout(() => {
+                            overlay.classList.remove('active');
+                            progressBar.style.background = 'linear-gradient(90deg, #28a745, #20c997)'; // Reset color
+                        }, 3000);
+                    });
+                    
+                    // Handle connection errors
+                    eventSource.onerror = (error) => {
+                        console.error('SSE error:', error);
+                        // Don't close immediately, might be temporary
+                    };
+                    
+                } else if (result.status === 'error') {
+                    progressBar.style.width = '100%';
+                    progressBar.style.background = 'linear-gradient(90deg, #dc3545, #c82333)';
+                    progressBar.textContent = 'Erreur';
+                    fileProgressBar.style.width = '0%';
+                    fileProgressBar.textContent = '';
+                    currentFileEl.textContent = '';
+                    fileProgressText.textContent = '';
+                    progressText.textContent = `❌ ${result.message}`;
+                    message.textContent = `❌ Erreur: ${result.message}`;
+                    setTimeout(() => {
+                        overlay.classList.remove('active');
+                        progressBar.style.background = 'linear-gradient(90deg, #28a745, #20c997)'; // Reset color
+                    }, 3000);
+                }
+            } catch (error) {
+                progressBar.style.width = '100%';
+                progressBar.style.background = 'linear-gradient(90deg, #dc3545, #c82333)';
+                progressBar.textContent = 'Erreur';
+                fileProgressBar.style.width = '0%';
+                fileProgressBar.textContent = '';
+                currentFileEl.textContent = '';
+                fileProgressText.textContent = '';
+                progressText.textContent = `❌ ${error.message}`;
+                message.textContent = `❌ Erreur: ${error.message}`;
+                setTimeout(() => {
+                    overlay.classList.remove('active');
+                    progressBar.style.background = 'linear-gradient(90deg, #28a745, #20c997)'; // Reset color
+                }, 3000);
+            } finally {
+                document.getElementById('btn-import').disabled = false;
+                document.getElementById('btn-reset').disabled = false;
+                e.target.value = ''; // Reset file input
+            }
+        });
+        
+        // Reset button handler
+        document.getElementById('btn-reset').addEventListener('click', () => {
+            resetModal.style.display = 'block';
+        });
+        
+        document.getElementById('cancel-reset').addEventListener('click', () => {
+            resetModal.style.display = 'none';
+        });
+        
+        document.getElementById('confirm-reset').addEventListener('click', async () => {
+            resetModal.style.display = 'none';
+            
+            // Show loading overlay
+            const overlay = document.getElementById('loading-overlay');
+            const message = document.getElementById('loading-message');
+            message.textContent = 'Suppression des données...';
+            overlay.classList.add('active');
+            
+            // Disable buttons
+            document.getElementById('btn-import').disabled = true;
+            document.getElementById('btn-reset').disabled = true;
+            
+            try {
+                const response = await fetch('/api/reset', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    message.textContent = `✅ ${result.message}`;
+                    setTimeout(() => {
+                        overlay.classList.remove('active');
+                        location.reload();
+                    }, 1500);
+                } else {
+                    message.textContent = `❌ Erreur: ${result.message}`;
+                    setTimeout(() => {
+                        overlay.classList.remove('active');
+                    }, 3000);
+                }
+            } catch (error) {
+                message.textContent = `❌ Erreur: ${error.message}`;
+                setTimeout(() => {
+                    overlay.classList.remove('active');
+                }, 3000);
+            } finally {
+                document.getElementById('btn-import').disabled = false;
+                document.getElementById('btn-reset').disabled = false;
+            }
+        });
+        
+        // Close modal when clicking outside
+        resetModal.addEventListener('click', (e) => {
+            if (e.target === resetModal) {
+                resetModal.style.display = 'none';
+            }
+        });
         
         // Initialize
         loadStats();

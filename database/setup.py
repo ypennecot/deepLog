@@ -97,6 +97,11 @@ def setup_schema():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_log_files_timestamp_range ON log_files(first_timestamp, last_timestamp);
         """)
+        # Add unique constraint to prevent duplicate imports
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_log_files_unique_filename_vehicle 
+            ON log_files(filename, vehicle_type, vehicle_id);
+        """)
         conn.commit()
         print("✓ log_files table created")
         

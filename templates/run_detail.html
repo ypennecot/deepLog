@@ -93,6 +93,36 @@
             color: #495057;
         }
         
+        .time-range-stats {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        
+        .stat-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .stat-value {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            color: #007bff;
+            background: #e7f3ff;
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+        
         .content {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -437,6 +467,12 @@
             <span id="time-range-end" class="time-range-value">--:--:--</span>
             <span class="time-range-duration">(<span id="time-range-duration">--</span>)</span>
         </div>
+        <div class="time-range-stats">
+            <div class="stat-item">
+                <span class="stat-label">Passages sous 50% target :</span>
+                <span id="stat-altitude-under-50" class="stat-value">--</span>
+            </div>
+        </div>
     </div>
     
     <div class="content">
@@ -757,6 +793,155 @@
             document.getElementById('time-range-start').textContent = startStr;
             document.getElementById('time-range-end').textContent = endStr;
             document.getElementById('time-range-duration').textContent = durationStr;
+            
+            // Update statistics (only if altitudeData is available)
+            if (typeof altitudeData !== 'undefined' && altitudeData !== null) {
+                updateStatistics();
+            }
+        }
+        
+        // Calculate number of times altitude Kogger goes under 50% of target altitude
+        function calculateAltitudeUnder50Percent() {
+            // Check if required data exists
+            if (typeof altitudeData === 'undefined' || altitudeData === null || typeof altitudeData !== 'object') {
+                return null;
+            }
+            
+            const koggerData = altitudeData['Altitude Kogger'];
+            const targetData = altitudeData['Target_altitude'];
+            
+            if (!koggerData || !Array.isArray(koggerData) || koggerData.length === 0) {
+                return null;
+            }
+            
+            if (!targetData || !Array.isArray(targetData) || targetData.length === 0) {
+                return null;
+            }
+            
+            // Create a map of target altitudes by time for quick lookup
+            const targetMap = new Map();
+            targetData.forEach(point => {
+                if (point.time && point.value !== null && point.value !== undefined) {
+                    const time = new Date(point.time).getTime();
+                    targetMap.set(time, point.value);
+                }
+            });
+            
+            // Merge and calculate ratios
+            const mergedData = [];
+            koggerData.forEach(point => {
+                if (point.time && point.value !== null && point.value !== undefined) {
+                    const time = new Date(point.time).getTime();
+                    // Find closest target altitude (simple approach: exact match or closest)
+                    let targetValue = targetMap.get(time);
+                    
+                    // If no exact match, find closest target value
+                    if (targetValue === undefined) {
+                        let closestTime = null;
+                        let minDiff = Infinity;
+                        targetMap.forEach((value, targetTime) => {
+                            const diff = Math.abs(time - targetTime);
+                            if (diff < minDiff) {
+                                minDiff = diff;
+                                closestTime = targetTime;
+                            }
+                        });
+                        if (closestTime !== null && minDiff < 1000) { // Within 1 second
+                            targetValue = targetMap.get(closestTime);
+                        }
+                    }
+                    
+                    if (targetValue !== undefined && targetValue > 0) {
+                        const ratio = point.value / targetValue;
+                        mergedData.push({
+                            time: time,
+                            kogger: point.value,
+                            target: targetValue,
+                            ratio: ratio
+                        });
+                    }
+                }
+            });
+            
+            if (mergedData.length < 2) {
+                return 0; // Need at least 2 points to detect sequences
+            }
+            
+            // Sort by time
+            mergedData.sort((a, b) => a.time - b.time);
+            
+            // Identify sequences and count transitions
+            let eventCount = 0;
+            let currentState = null; // 'above' (ratio >= 1.0), 'under50' (ratio < 0.5), or null
+            let consecutiveCount = 0;
+            let lastConfirmedState = null; // Last confirmed state (after at least 2 consecutive points)
+            
+            for (let i = 0; i < mergedData.length; i++) {
+                const point = mergedData[i];
+                let pointState = null;
+                
+                if (point.ratio >= 1.0) {
+                    pointState = 'above';
+                } else if (point.ratio < 0.5) {
+                    pointState = 'under50';
+                }
+                // else: transition state (between 0.5 and 1.0), ignore for sequence detection
+                
+                if (pointState === currentState) {
+                    consecutiveCount++;
+                } else {
+                    // State changed
+                    if (consecutiveCount >= 2 && currentState !== null) {
+                        // We had a confirmed sequence (at least 2 consecutive points)
+                        // Check for transition from "above" to "under50"
+                        if (lastConfirmedState === 'above' && currentState === 'under50') {
+                            // Confirmed transition: was above, now under 50%
+                            eventCount++;
+                        }
+                        lastConfirmedState = currentState;
+                    }
+                    
+                    currentState = pointState;
+                    consecutiveCount = 1;
+                }
+            }
+            
+            // Check final sequence
+            if (consecutiveCount >= 2 && currentState !== null) {
+                if (lastConfirmedState === 'above' && currentState === 'under50') {
+                    eventCount++;
+                }
+            }
+            
+            return eventCount;
+        }
+        
+        // Update statistics display
+        function updateStatistics() {
+            const statElement = document.getElementById('stat-altitude-under-50');
+            if (!statElement) {
+                return;
+            }
+            
+            // Check if altitudeData is defined before calculating
+            if (typeof altitudeData === 'undefined' || altitudeData === null) {
+                statElement.textContent = '--';
+                return;
+            }
+            
+            const count = calculateAltitudeUnder50Percent();
+            
+            if (count === null) {
+                statElement.textContent = '--';
+            } else {
+                if (count === 0) {
+                    statElement.textContent = '0 passage';
+                } else if (count === 1) {
+                    statElement.textContent = '1 passage';
+                } else {
+                    statElement.textContent = `${count} passages`;
+                }
+            }
         }
         
         // Expose timeRange globally for other scripts/graphs
@@ -786,6 +971,7 @@
             drawOrientationChart();
             updateMapTrajectory();
             updateTimeRangeDisplay();
+            updateStatistics();
         };
         
         // Chart setup
@@ -2414,6 +2600,12 @@
                 usvPositionDataFull = await response.json();
                 console.log(`Loaded ${usvPositionDataFull.length} USV position points (full)`);
                 
+                // Filter out points at (0, 0) - invalid coordinates
+                usvPositionDataFull = usvPositionDataFull.filter(p => {
+                    return p.lat !== 0 || p.lon !== 0;
+                });
+                console.log(`After filtering (0,0): ${usvPositionDataFull.length} USV position points`);
+                
                 // Filter data based on display range
                 filterDataByDisplayRange();
                 console.log(`Filtered to ${usvPositionData.length} USV position points`);
@@ -3136,6 +3328,10 @@
             // Filter USV position data
             if (usvPositionDataFull && Array.isArray(usvPositionDataFull)) {
                 usvPositionData = filterArrayByTimeRange(usvPositionDataFull, displayStartTime, displayEndTime);
+                // Filter out points at (0, 0) - invalid coordinates
+                usvPositionData = usvPositionData.filter(p => {
+                    return p.lat !== 0 || p.lon !== 0;
+                });
                 window.usvPositionData = usvPositionData;
             }
             
@@ -3242,7 +3438,13 @@
         
         // Get filtered position data based on display time range
         function getFilteredPositionData() {
-            return usvPositionData; // Already filtered by filterDataByDisplayRange()
+            // Filter out points at (0, 0) - invalid coordinates
+            if (!usvPositionData || !Array.isArray(usvPositionData)) {
+                return [];
+            }
+            return usvPositionData.filter(p => {
+                return p.lat !== 0 || p.lon !== 0;
+            });
         }
         
         // Initialize map
@@ -3621,6 +3823,7 @@
             window.displayStartTime = displayStartTime;
             window.displayEndTime = displayEndTime;
             updateTimeRangeDisplay();
+            updateStatistics();
         }
         
         // Load all data (in sequence to ensure proper initialization)
@@ -3676,6 +3879,7 @@
                     drawAltitudeChart();
                     updateMapTrajectory();
                     updateTimeRangeDisplay();
+                    updateStatistics();
                 }
             }, 200);
         }

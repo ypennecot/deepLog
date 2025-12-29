@@ -75,8 +75,16 @@ def get_or_create_data_type(cursor, data_type_name, vehicle_type):
     """, (data_type_name, vehicle_type, category))
     return cursor.fetchone()[0]
 
-def import_navigation_file(file_path, conn):
-    """Import a navigation log file."""
+def import_navigation_file(file_path, conn, file_progress=None):
+    """Import a navigation log file.
+    
+    Args:
+        file_path: Path to the navigation log file
+        conn: Database connection
+        file_progress: Optional dict to track file import progress. Will be updated with:
+            - 'bytes_total': Total file size in bytes
+            - 'bytes_processed': Estimated bytes processed
+    """
     filename = os.path.basename(file_path)
     vehicle_type, vehicle_id = extract_vehicle_info(filename)
     
@@ -87,8 +95,25 @@ def import_navigation_file(file_path, conn):
     cursor = conn.cursor()
     
     try:
+        # Check if file already exists
+        cursor.execute("""
+            SELECT id FROM log_files 
+            WHERE filename = %s AND vehicle_type = %s AND vehicle_id = %s
+            LIMIT 1
+        """, (filename, vehicle_type, vehicle_id))
+        existing = cursor.fetchone()
+        if existing:
+            print(f"⚠️  File {filename} already imported, skipping")
+            return False
+        
         # Create log_file entry
         file_size = os.path.getsize(file_path)
+        
+        # Initialize file progress tracking
+        if file_progress is not None:
+            file_progress['bytes_total'] = file_size
+            file_progress['bytes_processed'] = 0
+            file_progress['estimated_total_lines'] = None
         cursor.execute("""
             INSERT INTO log_files (filename, file_path, vehicle_type, vehicle_id, file_size_bytes, import_status, import_started_at)
             VALUES (%s, %s, %s, %s, %s, 'importing', NOW())
@@ -122,10 +147,37 @@ def import_navigation_file(file_path, conn):
                     raise e
                 continue
         
+        chunk_index = 0
         for chunk in csv_reader:
             # Prepare data for bulk insert
             entries = []
             data_type_ids = {}
+            
+            # Estimate total lines based on first chunk if not already estimated
+            if file_progress is not None and file_progress.get('estimated_total_lines') is None:
+                chunk_rows = len(chunk)
+                if chunk_rows > 0:
+                    # Try to estimate average bytes per row by reading a sample of the file
+                    # We'll use a simple heuristic: read first few lines to estimate line size
+                    try:
+                        with open(file_path, 'rb') as f:
+                            # Read first 10KB to estimate average line size
+                            sample = f.read(10240)
+                            if sample:
+                                sample_lines = sample.count(b'\n')
+                                if sample_lines > 0:
+                                    avg_bytes_per_line = len(sample) / sample_lines
+                                    estimated_total_lines = max(int(file_size / avg_bytes_per_line), chunk_rows)
+                                else:
+                                    # Fallback: estimate based on chunk size
+                                    estimated_total_lines = max(int((file_size / chunk_size) * chunk_rows), chunk_rows)
+                            else:
+                                estimated_total_lines = chunk_rows
+                    except Exception:
+                        # Fallback: estimate based on chunk size
+                        estimated_total_lines = max(int((file_size / chunk_size) * chunk_rows), chunk_rows)
+                    
+                    file_progress['estimated_total_lines'] = estimated_total_lines
             
             for _, row in chunk.iterrows():
                 try:
@@ -189,6 +241,22 @@ def import_navigation_file(file_path, conn):
                 """, entries)
                 total_rows += len(entries)
                 conn.commit()
+            
+            # Update file progress after each chunk
+            if file_progress is not None:
+                estimated_total_lines = file_progress.get('estimated_total_lines')
+                if estimated_total_lines and estimated_total_lines > 0:
+                    # Calculate progress ratio based on rows processed
+                    progress_ratio = min(total_rows / estimated_total_lines, 1.0)
+                    file_progress['bytes_processed'] = int(file_size * progress_ratio)
+                else:
+                    # Fallback: estimate based on chunk index (less accurate)
+                    # Assume we're processing roughly chunk_size rows per chunk
+                    estimated_chunks = max(1, int(file_size / (chunk_size * 100)))
+                    progress_ratio = min((chunk_index + 1) / estimated_chunks, 1.0)
+                    file_progress['bytes_processed'] = int(file_size * progress_ratio)
+            
+            chunk_index += 1
         
         # Update log_file with completion status
         cursor.execute("""
