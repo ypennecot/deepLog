@@ -709,13 +709,11 @@
         let isSelecting = false;
         let selectionStart = null;
         
-        // Drag/pan system variables
+        // Drag system variables
         let isDragging = false;           // True when dragging a selection box
         let dragStart = null;            // {x, y, time, value} at drag start
         let dragCurrent = null;          // {x, y, time, value} at current mouse position
         let currentDraggingChart = null; // Chart ID where dragging is happening
-        let isRightClickDragging = false; // True when right-click dragging (pan)
-        let panStart = null;             // {x, time} at pan start
         
         // Expose variables to window for testing
         window.displayStartTime = displayStartTime;
@@ -3633,29 +3631,23 @@
         function attachZoomListeners(canvasEl, containerEl, chartId) {
             if (!canvasEl || !containerEl) return;
             
-            // Mousedown: start drag or pan
+            // Mousedown: start drag
             canvasEl.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // Only left click
+                
                 const rect = canvasEl.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 
-                if (e.button === 0) { // Left click
-                    // Start selection box
-                    isDragging = true;
-                    currentDraggingChart = chartId;
-                    dragStart = {x, y, time: getTimeFromXForCanvas(containerEl, x)};
-                    dragCurrent = {x, y};
-                    e.preventDefault();
-                } else if (e.button === 2) { // Right click
-                    // Start pan
-                    console.log('[DEBUG] Right click (button 2) detected on', chartId);
-                    isRightClickDragging = true;
-                    panStart = {x, time: getTimeFromXForCanvas(containerEl, x)};
-                    e.preventDefault();
-                }
+                // Start selection box
+                isDragging = true;
+                currentDraggingChart = chartId;
+                dragStart = {x, y, time: getTimeFromXForCanvas(containerEl, x)};
+                dragCurrent = {x, y};
+                e.preventDefault();
             });
             
-            // Mousemove: update drag or pan
+            // Mousemove: update drag
             canvasEl.addEventListener('mousemove', (e) => {
                 const rect = canvasEl.getBoundingClientRect();
                 const x = e.clientX - rect.left;
@@ -3664,20 +3656,13 @@
                 if (isDragging) {
                     dragCurrent = {x, y};
                     drawChartById(chartId); // Redraw to show selection box
-                } else if (isRightClickDragging && panStart) {
-                    const currentTime = getTimeFromXForCanvas(containerEl, x);
-                    if (currentTime && panStart.time) {
-                        const timeDelta = (panStart.time - currentTime);
-                        applyPan(timeDelta);
-                        panStart.time = currentTime; // Update for next move
-                    }
                 } else {
                     // Normal hover (cursor line)
                     handleZoomMouseMove(containerEl, x, y);
                 }
             });
             
-            // Mouseup: apply zoom or finish pan
+            // Mouseup: apply zoom
             canvasEl.addEventListener('mouseup', (e) => {
                 if (e.button === 0 && isDragging) {
                     // Apply zoom
@@ -3710,29 +3695,14 @@
                     dragCurrent = null;
                     currentDraggingChart = null;
                     drawAllCharts();
-                } else if (e.button === 2) {
-                    // Right click released - do nothing here, contextmenu will handle it
-                    console.log('[DEBUG] Right click released, panStart was:', panStart);
                 }
             });
             
-            // Context menu: reset zoom or finish pan
+            // Context menu: reset zoom
             canvasEl.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                console.log('[DEBUG] Contextmenu triggered for', chartId, ', panStart:', panStart);
-                
-                // If panStart is null, it means we didn't actually pan (simple right click)
-                if (!panStart) {
-                    // Simple right click (not drag) = reset zoom
-                    console.log('[DEBUG] Calling resetZoom for chart:', chartId);
-                    resetZoom(true, true, chartId);
-                } else {
-                    console.log('[DEBUG] Contextmenu ignored (was panning)');
-                }
-                
-                // Reset flags
-                isRightClickDragging = false;
-                panStart = null;
+                console.log('[DEBUG] Right click - calling resetZoom for chart:', chartId);
+                resetZoom(true, true, chartId);
             });
             
             // Mouseleave: clear hover
