@@ -503,6 +503,7 @@
         <div class="left-column">
             <div class="panel">
                 <h2>Profondeur AUV</h2>
+                <div id="depth-legend" class="state-legend"></div>
                 <div id="depth-chart-container">
                     <canvas id="depth-chart"></canvas>
                     <div class="cursor-line" id="cursor-line" style="display: none;"></div>
@@ -2773,18 +2774,31 @@
         // Draw state legend
         function drawStateLegend(containerId) {
             const legendContainer = document.getElementById(containerId);
-            if (!legendContainer) return;
+            if (!legendContainer) {
+                console.warn(`[drawStateLegend] Container ${containerId} not found`);
+                return;
+            }
             
-            // Get all unique states from data
+            // Get all unique states from full data (not filtered)
             const uniqueStates = new Set();
-            if (stateData && stateData.length > 0) {
+            if (stateDataFull && stateDataFull.length > 0) {
+                stateDataFull.forEach(s => uniqueStates.add(Math.round(s.value)));
+            } else if (stateData && stateData.length > 0) {
+                // Fallback to filtered data if full data not available
                 stateData.forEach(s => uniqueStates.add(Math.round(s.value)));
             }
             
             // Filter to only show states that exist in data
             const statesToShow = Array.from(uniqueStates).sort((a, b) => a - b);
             
+            console.log(`[drawStateLegend] Found ${statesToShow.length} unique states:`, statesToShow);
+            
             legendContainer.innerHTML = '';
+            
+            if (statesToShow.length === 0) {
+                console.warn('[drawStateLegend] No states to display');
+                return;
+            }
             
             statesToShow.forEach(stateValue => {
                 const item = document.createElement('div');
