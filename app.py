@@ -1061,7 +1061,7 @@ def process_import_files(import_id, temp_dir):
         
         # Import using the existing import_logs module
         sys.path.insert(0, str(Path(__file__).parent / 'database'))
-        from import_logs import import_navigation_file, import_settings_file, extract_vehicle_info
+        from import_logs import import_navigation_file, import_settings_file, import_usbl_file, extract_vehicle_info
         
         conn = get_db_connection()
         files_processed = 0
@@ -1069,11 +1069,12 @@ def process_import_files(import_id, temp_dir):
         files_skipped = 0
         errors = []
         
-        # Use rglob to find all navigation and settings files recursively
+        # Use rglob to find all navigation, settings, and USBL files recursively
         temp_path = Path(temp_dir)
         nav_files = list(temp_path.rglob('*navigation*.csv'))
         settings_files = list(temp_path.rglob('*settings*.csv'))
-        all_files = nav_files + settings_files
+        usbl_files = list(temp_path.rglob('*usbl*.csv'))
+        all_files = nav_files + settings_files + usbl_files
         total_files = len(all_files)
         
         with import_status_lock:
@@ -1161,6 +1162,62 @@ def process_import_files(import_id, temp_dir):
                     import_status[import_id]['files_processed'] = files_processed
                     import_status[import_id]['files_imported'] = files_imported
                     import_status[import_id]['files_skipped'] = files_skipped
+        
+        # Import USBL files
+        for usbl_file in usbl_files:
+            # Create file_progress dict to track progress for this file
+            file_progress = {'bytes_processed': 0, 'bytes_total': 0, 'estimated_total_lines': None}
+            
+            try:
+                with import_status_lock:
+                    import_status[import_id]['current_file'] = usbl_file.name
+                    import_status[import_id]['file_index'] = files_processed + 1
+                    import_status[import_id]['current_file_bytes_processed'] = 0
+                    import_status[import_id]['current_file_bytes_total'] = 0
+                
+                # Start a thread to periodically update import_status with file progress
+                progress_update_active = threading.Event()
+                progress_update_active.set()
+                
+                def update_progress_periodically():
+                    while progress_update_active.is_set():
+                        with import_status_lock:
+                            if import_id in import_status:
+                                import_status[import_id]['current_file_bytes_processed'] = file_progress.get('bytes_processed', 0)
+                                import_status[import_id]['current_file_bytes_total'] = file_progress.get('bytes_total', 0)
+                        time.sleep(0.2)  # Update every 200ms
+                
+                progress_thread = threading.Thread(target=update_progress_periodically, daemon=True)
+                progress_thread.start()
+                
+                result = import_usbl_file(usbl_file, conn, file_progress)
+                
+                # Stop progress update thread
+                progress_update_active.clear()
+                progress_thread.join(timeout=0.5)
+                
+                # Final update
+                with import_status_lock:
+                    if import_id in import_status:
+                        import_status[import_id]['current_file_bytes_processed'] = file_progress.get('bytes_processed', 0)
+                        import_status[import_id]['current_file_bytes_total'] = file_progress.get('bytes_total', 0)
+                
+                if result:
+                    files_imported += 1
+                else:
+                    files_skipped += 1
+            except Exception as e:
+                error_msg = f"Error importing {usbl_file.name}: {str(e)}"
+                print(error_msg)
+                errors.append(error_msg)
+            finally:
+                files_processed += 1
+                with import_status_lock:
+                    import_status[import_id]['files_processed'] = files_processed
+                    import_status[import_id]['files_imported'] = files_imported
+                    import_status[import_id]['files_skipped'] = files_skipped
+                    import_status[import_id]['current_file_bytes_processed'] = 0
+                    import_status[import_id]['current_file_bytes_total'] = 0
         
         conn.close()
         
@@ -1268,6 +1325,57 @@ def reset_database():
             'status': 'error',
             'message': f'Erreur lors du reset: {str(e)}'
         }), 500
+
+@app.route('/api/run/<int:run_id>/usbl_sequence')
+def get_run_usbl_sequence(run_id):
+    """API endpoint to get USBL sequence data for the time period of an AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # First, get the time range of the AUV run
+        cursor.execute("""
+            SELECT first_timestamp, last_timestamp
+            FROM log_files
+            WHERE id = %s AND vehicle_type = 'AUV'
+        """, (run_id,))
+        
+        run_info = cursor.fetchone()
+        if not run_info:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        start_time = run_info['first_timestamp']
+        end_time = run_info['last_timestamp']
+        
+        # Get USBL sequence data for this time period
+        query = """
+            SELECT 
+                le.time,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type = 'USBL_Sequence'
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, (start_time, end_time))
+        sequence_data = cursor.fetchall()
+        
+        # Convert to list with ISO timestamps
+        result = []
+        for row in sequence_data:
+            entry = dict(row)
+            if entry['time']:
+                entry['time'] = entry['time'].isoformat()
+            result.append(entry)
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.route('/api/run/<int:run_id>/usv_order')
 def get_run_usv_order(run_id):

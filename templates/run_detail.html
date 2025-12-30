@@ -367,6 +367,19 @@
             border: 1px solid #ddd;
         }
         
+        #usbl-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #usbl-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
         #altitude-chart-container {
             flex: 1;
             position: relative;
@@ -652,6 +665,14 @@
         </div>
         
         <div class="panel">
+            <h2>USBL (Séquences)</h2>
+            <div id="usbl-chart-container">
+                <canvas id="usbl-chart"></canvas>
+                <div class="cursor-line" id="cursor-line-usbl" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <div class="panel">
             <h2>Altitude et OA AUV</h2>
             <div class="altitude-controls">
                 <label>
@@ -705,6 +726,8 @@
         let orientationDataFull = {}; // Orientation data (Roll, Pitch, Yaw, Heading) - object with keys: 'Roll', 'Pitch', 'Yaw', 'Heading'
         let waterTempDataFull = []; // Water temperature data (AUV)
         let altitudeDataFull = {}; // Altitude data - object with keys: 'Altitude Kogger', 'Altitude Kogger raw', 'Altitude OA', 'Altitude OA filt'
+        let usblDataFull = []; // USBL sequence data (USV)
+        let usblData = []; // Filtered USBL data
         let usvOrderStringToInt = {}; // Mapping string -> int for Order to AUV
         let usvOrderIntToString = {}; // Mapping int -> string for Order to AUV (reverse)
         
@@ -721,6 +744,7 @@
         let orientationYRange = null;
         let waterTempYRange = null;
         let altitudeYRange = null;
+        let usblYRange = null;
         
         // Filtered data (based on displayStartTime and displayEndTime)
         let depthData = [];
@@ -1060,6 +1084,11 @@
         const waterTempContainer = document.getElementById('water-temp-chart-container');
         const waterTempCursorLine = document.getElementById('cursor-line-water-temp');
         
+        const usblCanvas = document.getElementById('usbl-chart');
+        const usblCtx = usblCanvas ? usblCanvas.getContext('2d') : null;
+        const usblContainer = document.getElementById('usbl-chart-container');
+        const usblCursorLine = document.getElementById('cursor-line-usbl');
+        
         const altitudeCanvas = document.getElementById('altitude-chart');
         const altitudeCtx = altitudeCanvas ? altitudeCanvas.getContext('2d') : null;
         const altitudeContainer = document.getElementById('altitude-chart-container');
@@ -1318,6 +1347,14 @@
             resizeCanvasGeneric(waterTempCanvas, waterTempContainer, waterTempCtx, 'Water temp', () => {
                 if (waterTempData && waterTempData.length > 0) {
                     drawWaterTempChart();
+                }
+            });
+        }
+        
+        function resizeUSBLCanvas() {
+            resizeCanvasGeneric(usblCanvas, usblContainer, usblCtx, 'USBL', () => {
+                if (usblData && usblData.length > 0) {
+                    drawUSBLChart();
                 }
             });
         }
@@ -2378,6 +2415,92 @@
             drawSelectionBox(waterTempCtx, 'waterTemp', padding);
         }
         
+        // Draw USBL chart
+        function drawUSBLChart() {
+            if (!usblCanvas || !usblContainer || !usblCtx) {
+                console.warn('USBL canvas, container, or ctx not available for drawUSBLChart');
+                return;
+            }
+            
+            const rect = usblContainer.getBoundingClientRect();
+            
+            if (!usblData || usblData.length === 0) {
+                usblCtx.clearRect(0, 0, usblCanvas.width, usblCanvas.height);
+                usblCtx.fillStyle = '#666';
+                usblCtx.font = '16px sans-serif';
+                usblCtx.textAlign = 'center';
+                usblCtx.fillText('Aucune donnée USBL disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                return;
+            }
+            
+            usblCtx.clearRect(0, 0, usblCanvas.width, usblCanvas.height);
+            
+            if (displayStartTime === null || displayEndTime === null) {
+                usblCtx.fillStyle = '#666';
+                usblCtx.font = '16px sans-serif';
+                usblCtx.textAlign = 'center';
+                usblCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            const timeSpan = maxTime - minTime;
+            
+            // Draw state background zones
+            drawStateBackground(usblCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Calculate value range
+            const values = usblData.map(d => d.value).filter(v => v !== null && v !== undefined);
+            if (values.length === 0) {
+                usblCtx.fillStyle = '#666';
+                usblCtx.font = '16px sans-serif';
+                usblCtx.textAlign = 'center';
+                usblCtx.fillText('Aucune donnée USBL dans la plage sélectionnée', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinValue, adjustedMaxValue;
+            if (usblYRange) {
+                adjustedMinValue = usblYRange.min;
+                adjustedMaxValue = usblYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(values);
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
+            
+            // Draw axes using utility function
+            drawChartAxes(usblCtx, padding, chartWidth, chartHeight);
+            
+            // Draw grid and Y axis labels
+            drawChartGrid(usblCtx, padding, chartWidth, chartHeight, 8, adjustedMinValue, adjustedMaxValue,
+                (value) => `${Math.round(value)}`);
+            
+            // Draw time labels
+            drawTimeLabels(usblCtx, padding, chartWidth, chartHeight, minTime, maxTime, 8);
+            
+            // Draw USBL sequence curve
+            const usblColor = '#ff6b35';
+            drawCurve(usblCtx, usblData, padding, chartWidth, chartHeight,
+                minTime, maxTime, adjustedMinValue, adjustedMaxValue, usblColor, 2);
+            
+            // Update cursor line
+            updateCursorLine(usblCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(usblCtx, 'usbl', padding);
+        }
+        
         // Draw altitude chart
         function drawAltitudeChart() {
             if (!altitudeCanvas || !altitudeContainer || !altitudeCtx) {
@@ -3293,6 +3416,15 @@
                         maxValue = Math.ceil(max);
                     }
                     break;
+                case 'usbl':
+                    if (usblYRange) return usblYRange;
+                    const usblValues = usblData.map(d => d.value || 0);
+                    if (usblValues.length > 0) {
+                        const {min, max} = calculateMinMax(usblValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
                 case 'altitude':
                     if (altitudeYRange) return altitudeYRange;
                     let allAltitudeValues = [];
@@ -3322,6 +3454,7 @@
                 case 'bearingPing': drawBearingPingChart(); break;
                 case 'orientation': drawOrientationChart(); break;
                 case 'waterTemp': drawWaterTempChart(); break;
+                case 'usbl': drawUSBLChart(); break;
                 case 'altitude': drawAltitudeChart(); break;
             }
         }
@@ -3443,6 +3576,7 @@
                 case 'bearingPing': bearingPingYRange = {min: minValue, max: maxValue}; break;
                 case 'orientation': orientationYRange = {min: minValue, max: maxValue}; break;
                 case 'waterTemp': waterTempYRange = {min: minValue, max: maxValue}; break;
+                case 'usbl': usblYRange = {min: minValue, max: maxValue}; break;
                 case 'altitude': altitudeYRange = {min: minValue, max: maxValue}; break;
             }
             console.log('[DEBUG] YRange set for', chartId, ':', {min: minValue, max: maxValue});
@@ -3489,6 +3623,7 @@
                         case 'bearingPing': bearingPingYRange = null; break;
                         case 'orientation': orientationYRange = null; break;
                         case 'waterTemp': waterTempYRange = null; break;
+                        case 'usbl': usblYRange = null; break;
                         case 'altitude': altitudeYRange = null; break;
                     }
                 } else {
@@ -3500,6 +3635,7 @@
                     bearingPingYRange = null;
                     orientationYRange = null;
                     waterTempYRange = null;
+                    usblYRange = null;
                     altitudeYRange = null;
                 }
             }
@@ -3839,6 +3975,7 @@
         attachZoomListeners(bearingPingCanvas, bearingPingContainer, 'bearingPing');
         attachZoomListeners(orientationCanvas, orientationContainer, 'orientation');
         attachZoomListeners(waterTempCanvas, waterTempContainer, 'waterTemp');
+        attachZoomListeners(usblCanvas, usblContainer, 'usbl');
         attachZoomListeners(altitudeCanvas, altitudeContainer, 'altitude');
         
         // Filter data based on displayStartTime and displayEndTime
@@ -4372,6 +4509,8 @@
             console.log('loadAllData: Water temperature data loaded');
             await loadAltitudeData();
             console.log('loadAllData: Altitude data loaded');
+            await loadUSBLData();
+            console.log('loadAllData: USBL data loaded');
             await loadUSVStateData();
             console.log('loadAllData: USV State data loaded');
             await loadUSVOrderData();
@@ -4406,6 +4545,7 @@
                     drawBearingPingChart();
                     drawOrientationChart();
                     drawWaterTempChart();
+                    drawUSBLChart();
                     drawAltitudeChart();
                     updateMapTrajectory();
                     updateTimeRangeDisplay();

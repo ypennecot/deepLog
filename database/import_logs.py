@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import json
+from decode_usbl import decode_usbl_message, convert_kogger_state_to_seaker
 
 load_dotenv()
 
@@ -323,6 +324,244 @@ def import_navigation_file(file_path, conn, file_progress=None):
         """, (str(e), log_file_id))
         conn.commit()
         print(f"❌ Error importing {filename}: {e}")
+        return False
+    finally:
+        cursor.close()
+
+def import_usbl_file(file_path, conn, file_progress=None):
+    """Import a USBL log file.
+    
+    Args:
+        file_path: Path to the USBL log file
+        conn: Database connection
+        file_progress: Optional dict to track file import progress
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    filename = os.path.basename(file_path)
+    vehicle_type, vehicle_id = extract_vehicle_info(filename)
+    
+    if not vehicle_type:
+        print(f"⚠️  Could not determine vehicle type from {filename}, skipping")
+        return False
+    
+    # USBL files are from USV
+    if vehicle_type != 'USV':
+        print(f"⚠️  USBL file {filename} is not from USV, skipping")
+        return False
+    
+    cursor = conn.cursor()
+    log_file_id = None
+    
+    try:
+        # Check if file already exists
+        cursor.execute("""
+            SELECT id FROM log_files 
+            WHERE filename = %s AND vehicle_type = %s AND vehicle_id = %s
+            LIMIT 1
+        """, (filename, vehicle_type, vehicle_id))
+        existing = cursor.fetchone()
+        if existing:
+            print(f"⚠️  File {filename} already imported, skipping")
+            return False
+        
+        # Create log_file entry
+        file_size = os.path.getsize(file_path)
+        
+        if file_progress is not None:
+            file_progress['bytes_total'] = file_size
+            file_progress['bytes_processed'] = 0
+        
+        cursor.execute("""
+            INSERT INTO log_files (filename, file_path, vehicle_type, vehicle_id, file_size_bytes, import_status, import_started_at)
+            VALUES (%s, %s, %s, %s, %s, 'importing', NOW())
+            RETURNING id
+        """, (filename, str(file_path), vehicle_type, vehicle_id, file_size))
+        log_file_id = cursor.fetchone()[0]
+        conn.commit()
+        
+        print(f"📄 Importing USBL file {filename} ({vehicle_type} {vehicle_id})...")
+        
+        # Read CSV line by line
+        total_rows = 0
+        entries = []
+        data_type_ids = {}
+        
+        # Data types for USBL
+        usbl_data_types = {
+            'USBL_Bearing': 'acoustic',
+            'USBL_Elevation': 'acoustic',
+            'USBL_Distance': 'acoustic',
+            'USBL_AUV_State': 'state',
+            'USBL_SNR': 'acoustic',
+            'USBL_Sequence': 'acoustic'  # For tracking message sequences
+        }
+        
+        # Get or create data types
+        for data_type_name, category in usbl_data_types.items():
+            data_type_ids[data_type_name] = get_or_create_data_type(cursor, data_type_name, vehicle_type)
+        
+        first_timestamp = None
+        last_timestamp = None
+        
+        # Read file in chunks for large files
+        chunk_size = 50000
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            chunk = []
+            for line in f:
+                chunk.append(line)
+                if len(chunk) >= chunk_size:
+                    # Process chunk
+                    for csv_line in chunk:
+                        parts = csv_line.strip().split(',', 2)
+                        if len(parts) < 3:
+                            continue
+                        
+                        timestamp_str = parts[0].strip()
+                        direction = parts[1].strip()
+                        data_str = ','.join(parts[2:])
+                        
+                        # Only process RECEIVED messages with POSITION_RESPONSE
+                        if direction != 'RECEIVED':
+                            continue
+                        
+                        # Decode message
+                        decoded = decode_usbl_message(data_str, direction)
+                        if not decoded or decoded.get('message_type') != 'POSITION_RESPONSE':
+                            continue
+                        
+                        # Parse timestamp
+                        try:
+                            timestamp = pd.to_datetime(timestamp_str, errors='coerce')
+                            if pd.isna(timestamp):
+                                continue
+                            
+                            if timestamp.year < 2000 or timestamp.year > 2100:
+                                continue
+                        except:
+                            continue
+                        
+                        if first_timestamp is None or timestamp < first_timestamp:
+                            first_timestamp = timestamp
+                        if last_timestamp is None or timestamp > last_timestamp:
+                            last_timestamp = timestamp
+                        
+                        # Extract data from decoded message
+                        seq = decoded.get('sequence')
+                        
+                        # Store sequence number
+                        if seq is not None:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USBL_Sequence'],
+                                float(seq),
+                                log_file_id
+                            ))
+                        
+                        # Note: azimuth, elevation, distance, state, snr are None for now
+                        # as the format needs more analysis. We store what we can extract.
+                        # These can be added later when the format is better understood.
+                        
+                        total_rows += 1
+                    
+                    # Bulk insert
+                    if entries:
+                        execute_values(cursor, """
+                            INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
+                            VALUES %s
+                        """, entries, page_size=1000)
+                        conn.commit()
+                        
+                        # Update progress
+                        if file_progress is not None:
+                            progress_ratio = min(total_rows / 100000, 1.0)  # Estimate
+                            file_progress['bytes_processed'] = int(file_size * progress_ratio)
+                        
+                        entries = []
+                    
+                    chunk = []
+            
+            # Process remaining chunk
+            if chunk:
+                for csv_line in chunk:
+                    parts = csv_line.strip().split(',', 2)
+                    if len(parts) < 3:
+                        continue
+                    
+                    timestamp_str = parts[0].strip()
+                    direction = parts[1].strip()
+                    data_str = ','.join(parts[2:])
+                    
+                    if direction != 'RECEIVED':
+                        continue
+                    
+                    decoded = decode_usbl_message(data_str, direction)
+                    if not decoded or decoded.get('message_type') != 'POSITION_RESPONSE':
+                        continue
+                    
+                    try:
+                        timestamp = pd.to_datetime(timestamp_str, errors='coerce')
+                        if pd.isna(timestamp) or timestamp.year < 2000 or timestamp.year > 2100:
+                            continue
+                    except:
+                        continue
+                    
+                    if first_timestamp is None or timestamp < first_timestamp:
+                        first_timestamp = timestamp
+                    if last_timestamp is None or timestamp > last_timestamp:
+                        last_timestamp = timestamp
+                    
+                    seq = decoded.get('sequence')
+                    if seq is not None:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USBL_Sequence'],
+                            float(seq),
+                            log_file_id
+                        ))
+                    
+                    total_rows += 1
+        
+        # Final bulk insert
+        if entries:
+            execute_values(cursor, """
+                INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
+                VALUES %s
+            """, entries, page_size=1000)
+            conn.commit()
+        
+        # Update log_file with completion status
+        cursor.execute("""
+            UPDATE log_files
+            SET import_status = 'completed',
+                import_completed_at = NOW(),
+                row_count = %s,
+                first_timestamp = %s,
+                last_timestamp = %s
+            WHERE id = %s
+        """, (total_rows, first_timestamp, last_timestamp, log_file_id))
+        conn.commit()
+        
+        print(f"✅ Imported {total_rows:,} USBL entries from {filename}")
+        return True
+        
+    except Exception as e:
+        conn.rollback()
+        if log_file_id:
+            cursor.execute("""
+                UPDATE log_files
+                SET import_status = 'failed', error_message = %s
+                WHERE id = %s
+            """, (str(e), log_file_id))
+            conn.commit()
+        print(f"❌ Error importing USBL file {filename}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
     finally:
         cursor.close()
