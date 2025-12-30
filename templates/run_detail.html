@@ -2836,12 +2836,22 @@
                 if (allValues[i] < minAllValues) minAllValues = allValues[i];
                 if (allValues[i] > maxAllValues) maxAllValues = allValues[i];
             }
-            const minDepth = Math.min(0, minAllValues); // Start from 0 (surface) or minimum
-            const maxDepth = Math.max(0, maxAllValues); // Go down to maximum depth (negative)
             
-            // Round depth values (keep negative values for depth below surface)
-            const adjustedMinDepth = Math.floor(minDepth);
-            const adjustedMaxDepth = Math.ceil(maxDepth);
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinDepth, adjustedMaxDepth;
+            if (depthYRange) {
+                // Utiliser le zoom Y si disponible (sans contraintes de zéro)
+                console.log('[DEBUG] drawDepthChart: Using depthYRange:', depthYRange);
+                adjustedMinDepth = depthYRange.min;
+                adjustedMaxDepth = depthYRange.max;
+            } else {
+                // Calcul automatique avec contrainte de zéro
+                console.log('[DEBUG] drawDepthChart: Auto-calculating range (no zoom), values:', {minAllValues, maxAllValues});
+                const minDepth = Math.min(0, minAllValues); // Start from 0 (surface) or minimum
+                const maxDepth = Math.max(0, maxAllValues); // Go down to maximum depth (negative)
+                adjustedMinDepth = Math.floor(minDepth);
+                adjustedMaxDepth = Math.ceil(maxDepth);
+            }
             
             // Draw axes
             ctx.strokeStyle = '#333';
@@ -3307,6 +3317,7 @@
         }
         
         function applyValueZoom(chartId, minValue, maxValue) {
+            console.log('[DEBUG] applyValueZoom called:', {chartId, minValue, maxValue});
             // Déterminer quelle variable YRange mettre à jour
             switch(chartId) {
                 case 'depth': depthYRange = {min: minValue, max: maxValue}; break;
@@ -3318,6 +3329,7 @@
                 case 'waterTemp': waterTempYRange = {min: minValue, max: maxValue}; break;
                 case 'altitude': altitudeYRange = {min: minValue, max: maxValue}; break;
             }
+            console.log('[DEBUG] YRange set for', chartId, ':', {min: minValue, max: maxValue});
             
             // Redessiner uniquement ce graphique
             drawChartById(chartId);
@@ -3636,6 +3648,7 @@
                     e.preventDefault();
                 } else if (e.button === 2) { // Right click
                     // Start pan
+                    console.log('[DEBUG] Right click (button 2) detected on', chartId);
                     isRightClickDragging = true;
                     panStart = {x, time: getTimeFromXForCanvas(containerEl, x)};
                     e.preventDefault();
@@ -3697,20 +3710,29 @@
                     dragCurrent = null;
                     currentDraggingChart = null;
                     drawAllCharts();
-                } else if (e.button === 2 && isRightClickDragging) {
-                    // Finish pan
-                    isRightClickDragging = false;
-                    panStart = null;
+                } else if (e.button === 2) {
+                    // Right click released - do nothing here, contextmenu will handle it
+                    console.log('[DEBUG] Right click released, panStart was:', panStart);
                 }
             });
             
-            // Context menu: reset zoom
+            // Context menu: reset zoom or finish pan
             canvasEl.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                if (!isRightClickDragging) {
+                console.log('[DEBUG] Contextmenu triggered for', chartId, ', panStart:', panStart);
+                
+                // If panStart is null, it means we didn't actually pan (simple right click)
+                if (!panStart) {
                     // Simple right click (not drag) = reset zoom
+                    console.log('[DEBUG] Calling resetZoom for chart:', chartId);
                     resetZoom(true, true, chartId);
+                } else {
+                    console.log('[DEBUG] Contextmenu ignored (was panning)');
                 }
+                
+                // Reset flags
+                isRightClickDragging = false;
+                panStart = null;
             });
             
             // Mouseleave: clear hover
