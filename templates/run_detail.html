@@ -3439,6 +3439,15 @@
                         maxValue = Math.ceil(max);
                     }
                     break;
+                case 'usbl':
+                    if (usblYRange) return usblYRange;
+                    const usblValues = usblData.map(d => d.value || 0);
+                    if (usblValues.length > 0) {
+                        const {min, max} = calculateMinMax(usblValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
             }
             
             return {min: minValue, max: maxValue};
