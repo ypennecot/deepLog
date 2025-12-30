@@ -5,6 +5,7 @@ Handles different import logic for AUV (navigation + settings) and USV (navigati
 """
 
 import psycopg2
+from psycopg2.extras import execute_values
 import pandas as pd
 import os
 import re
@@ -125,7 +126,16 @@ def import_navigation_file(file_path, conn, file_progress=None):
         print(f"📄 Importing {filename} ({vehicle_type} {vehicle_id})...")
         
         # Read CSV in chunks for large files
-        chunk_size = 50000
+        # Adjust chunk size based on file size for better performance
+        file_size_mb = file_size / (1024 * 1024)
+        if file_size_mb > 30:  # Large files (> 30 MB)
+            chunk_size = 100000  # Bigger chunks for large files
+            log_frequency = 10  # Log every 10 chunks
+            print(f"  ℹ️  Large file detected ({file_size_mb:.1f} MB), using optimized settings")
+        else:
+            chunk_size = 50000
+            log_frequency = 1  # Log every chunk
+        
         total_rows = 0
         first_timestamp = None
         last_timestamp = None
@@ -233,14 +243,18 @@ def import_navigation_file(file_path, conn, file_progress=None):
                     # Silently skip problematic rows
                     continue
             
-            # Bulk insert
+            # Bulk insert with execute_values (much faster than executemany)
             if entries:
-                cursor.executemany("""
+                execute_values(cursor, """
                     INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, entries)
+                    VALUES %s
+                """, entries, page_size=1000)
                 total_rows += len(entries)
                 conn.commit()
+                
+                # Log progress for large files (less frequently to reduce overhead)
+                if chunk_index % log_frequency == 0:
+                    print(f"  📊 Processed {total_rows:,} rows...")
             
             # Update file progress after each chunk
             if file_progress is not None:
