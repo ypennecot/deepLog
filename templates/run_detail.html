@@ -3468,6 +3468,7 @@
             drawBearingPingChart();
             drawOrientationChart();
             drawWaterTempChart();
+            drawUSBLChart();
             drawAltitudeChart();
             updateMapTrajectory();
             updateStatistics();
@@ -4036,8 +4037,15 @@
                 waterTempData = filterArrayByTimeRange(waterTempDataFull, displayStartTime, displayEndTime);
             }
             
+            // Filter USBL data
+            if (usblDataFull && Array.isArray(usblDataFull)) {
+                usblData = filterArrayByTimeRange(usblDataFull, displayStartTime, displayEndTime);
+            }
+            
             // Filter altitude data
-            altitudeData = filterObjectByTimeRange(altitudeDataFull, displayStartTime, displayEndTime);
+            if (altitudeDataFull && typeof altitudeDataFull === 'object') {
+                altitudeData = filterObjectByTimeRange(altitudeDataFull, displayStartTime, displayEndTime);
+            }
             
             // Calculate derived data from motor data
             calculateDerivedData();
