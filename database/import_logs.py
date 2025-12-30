@@ -158,7 +158,13 @@ def import_navigation_file(file_path, conn, file_progress=None):
                 continue
         
         chunk_index = 0
+        import time
+        last_log_time = time.time()
+        
         for chunk in csv_reader:
+            chunk_start_time = time.time()
+            print(f"[DEBUG] Starting chunk {chunk_index}, chunk size: {len(chunk)} rows")
+            
             # Prepare data for bulk insert
             entries = []
             data_type_ids = {}
@@ -245,12 +251,25 @@ def import_navigation_file(file_path, conn, file_progress=None):
             
             # Bulk insert with execute_values (much faster than executemany)
             if entries:
+                insert_start = time.time()
+                print(f"[DEBUG] Chunk {chunk_index}: Inserting {len(entries):,} entries...")
+                
                 execute_values(cursor, """
                     INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
                     VALUES %s
                 """, entries, page_size=1000)
-                total_rows += len(entries)
+                
+                insert_time = time.time() - insert_start
+                print(f"[DEBUG] Chunk {chunk_index}: Insert took {insert_time:.2f}s")
+                
+                commit_start = time.time()
                 conn.commit()
+                commit_time = time.time() - commit_start
+                print(f"[DEBUG] Chunk {chunk_index}: Commit took {commit_time:.2f}s")
+                
+                total_rows += len(entries)
+                chunk_time = time.time() - chunk_start_time
+                print(f"[DEBUG] Chunk {chunk_index}: Total time {chunk_time:.2f}s, Total rows: {total_rows:,}")
                 
                 # Log progress for large files (less frequently to reduce overhead)
                 if chunk_index % log_frequency == 0:
@@ -263,14 +282,22 @@ def import_navigation_file(file_path, conn, file_progress=None):
                     # Calculate progress ratio based on rows processed
                     progress_ratio = min(total_rows / estimated_total_lines, 1.0)
                     file_progress['bytes_processed'] = int(file_size * progress_ratio)
+                    print(f"[DEBUG] Chunk {chunk_index}: Progress {progress_ratio*100:.1f}% ({total_rows:,}/{estimated_total_lines:,} rows)")
                 else:
-                    # Fallback: estimate based on chunk index (less accurate)
-                    # Assume we're processing roughly chunk_size rows per chunk
-                    estimated_chunks = max(1, int(file_size / (chunk_size * 100)))
-                    progress_ratio = min((chunk_index + 1) / estimated_chunks, 1.0)
+                    # Fallback: estimate based on file size and average bytes per row
+                    # Use a more reasonable estimate: assume ~100 bytes per row on average
+                    estimated_rows = max(1, int(file_size / 100))
+                    progress_ratio = min(total_rows / estimated_rows, 1.0)
                     file_progress['bytes_processed'] = int(file_size * progress_ratio)
+                    print(f"[DEBUG] Chunk {chunk_index}: Progress estimate {progress_ratio*100:.1f}% ({total_rows:,} rows processed)")
             
             chunk_index += 1
+            
+            # Log every 10 seconds for very slow imports
+            current_time = time.time()
+            if current_time - last_log_time > 10:
+                print(f"[DEBUG] Still processing... chunk {chunk_index}, {total_rows:,} rows so far, {current_time - chunk_start_time:.1f}s elapsed")
+                last_log_time = current_time
         
         # Update log_file with completion status
         cursor.execute("""
