@@ -367,13 +367,39 @@
             border: 1px solid #ddd;
         }
         
-        #usbl-chart-container {
+        #usbl-azimuth-elevation-chart-container {
             flex: 1;
             position: relative;
             min-height: 300px;
         }
         
-        #usbl-chart {
+        #usbl-azimuth-elevation-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
+        #usbl-distance-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #usbl-distance-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
+        #usv-full-auv-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #usv-full-auv-chart {
             width: 100%;
             height: 100%;
             cursor: crosshair;
@@ -530,52 +556,37 @@
             </div>
             
             <div class="panel">
-                <h2>Moteurs (M1-M8)</h2>
-                <div class="motor-controls">
+                <h2>Altitude et OA AUV</h2>
+                <div class="altitude-controls">
                     <label>
-                        <input type="checkbox" id="show-m1" checked>
-                        <span class="motor-color-indicator" style="background: #007bff;"></span>
-                        M1
+                        <input type="checkbox" id="show-altitude-kogger" checked>
+                        <span class="altitude-color-indicator" style="background: #007bff;"></span>
+                        Altitude Kogger
                     </label>
                     <label>
-                        <input type="checkbox" id="show-m2" checked>
-                        <span class="motor-color-indicator" style="background: #28a745;"></span>
-                        M2
+                        <input type="checkbox" id="show-altitude-kogger-raw" checked>
+                        <span class="altitude-color-indicator" style="background: #6c757d;"></span>
+                        Altitude Kogger raw
                     </label>
                     <label>
-                        <input type="checkbox" id="show-m3" checked>
-                        <span class="motor-color-indicator" style="background: #dc3545;"></span>
-                        M3
+                        <input type="checkbox" id="show-altitude-oa" checked>
+                        <span class="altitude-color-indicator" style="background: #dc3545;"></span>
+                        Altitude OA
                     </label>
                     <label>
-                        <input type="checkbox" id="show-m4" checked>
-                        <span class="motor-color-indicator" style="background: #ffc107;"></span>
-                        M4
+                        <input type="checkbox" id="show-altitude-oa-filt" checked>
+                        <span class="altitude-color-indicator" style="background: #28a745;"></span>
+                        Altitude OA filt
                     </label>
                     <label>
-                        <input type="checkbox" id="show-m5" checked>
-                        <span class="motor-color-indicator" style="background: #17a2b8;"></span>
-                        M5
-                    </label>
-                    <label>
-                        <input type="checkbox" id="show-m6" checked>
-                        <span class="motor-color-indicator" style="background: #6f42c1;"></span>
-                        M6
-                    </label>
-                    <label>
-                        <input type="checkbox" id="show-m7" checked>
-                        <span class="motor-color-indicator" style="background: #fd7e14;"></span>
-                        M7
-                    </label>
-                    <label>
-                        <input type="checkbox" id="show-m8" checked>
-                        <span class="motor-color-indicator" style="background: #20c997;"></span>
-                        M8
+                        <input type="checkbox" id="show-target-altitude" checked>
+                        <span class="altitude-color-indicator" style="background: #ffc107;"></span>
+                        Target Altitude
                     </label>
                 </div>
-                <div id="motors-chart-container">
-                    <canvas id="motors-chart"></canvas>
-                    <div class="cursor-line" id="cursor-line-motors" style="display: none;"></div>
+                <div id="altitude-chart-container">
+                    <canvas id="altitude-chart"></canvas>
+                    <div class="cursor-line" id="cursor-line-altitude" style="display: none;"></div>
                 </div>
             </div>
         </div>
@@ -586,27 +597,27 @@
         </div>
         
         <div class="panel">
-            <h2>Avant / Yaw / Up</h2>
+            <h2>USV Full AUV Tracking</h2>
             <div class="derived-controls">
                 <label>
-                    <input type="checkbox" id="show-avant" checked>
+                    <input type="checkbox" id="show-usv-full-distance" checked>
                     <span class="derived-color-indicator" style="background: #007bff;"></span>
-                    Avant
+                    Distance
                 </label>
                 <label>
-                    <input type="checkbox" id="show-yaw" checked>
+                    <input type="checkbox" id="show-usv-full-bearing" checked>
                     <span class="derived-color-indicator" style="background: #28a745;"></span>
-                    Yaw
+                    Bearing
                 </label>
                 <label>
-                    <input type="checkbox" id="show-up" checked>
+                    <input type="checkbox" id="show-usv-full-elevation" checked>
                     <span class="derived-color-indicator" style="background: #dc3545;"></span>
-                    Up
+                    Elevation
                 </label>
             </div>
-            <div id="derived-chart-container">
-                <canvas id="derived-chart"></canvas>
-                <div class="cursor-line" id="cursor-line-derived" style="display: none;"></div>
+            <div id="usv-full-auv-chart-container">
+                <canvas id="usv-full-auv-chart"></canvas>
+                <div class="cursor-line" id="cursor-line-usv-full-auv" style="display: none;"></div>
             </div>
         </div>
         
@@ -665,47 +676,96 @@
         </div>
         
         <div class="panel">
-            <h2>USBL (Séquences)</h2>
-            <div id="usbl-chart-container">
-                <canvas id="usbl-chart"></canvas>
-                <div class="cursor-line" id="cursor-line-usbl" style="display: none;"></div>
+            <h2>USBL Azimuth et Elevation</h2>
+            <div id="usbl-azimuth-elevation-chart-container">
+                <canvas id="usbl-azimuth-elevation-chart"></canvas>
+                <div class="cursor-line" id="cursor-line-usbl-azimuth-elevation" style="display: none;"></div>
             </div>
         </div>
         
         <div class="panel">
-            <h2>Altitude et OA AUV</h2>
-            <div class="altitude-controls">
-                <label>
-                    <input type="checkbox" id="show-altitude-kogger" checked>
-                    <span class="altitude-color-indicator" style="background: #007bff;"></span>
-                    Altitude Kogger
-                </label>
-                <label>
-                    <input type="checkbox" id="show-altitude-kogger-raw" checked>
-                    <span class="altitude-color-indicator" style="background: #6c757d;"></span>
-                    Altitude Kogger raw
-                </label>
-                <label>
-                    <input type="checkbox" id="show-altitude-oa" checked>
-                    <span class="altitude-color-indicator" style="background: #dc3545;"></span>
-                    Altitude OA
-                </label>
-                <label>
-                    <input type="checkbox" id="show-altitude-oa-filt" checked>
-                    <span class="altitude-color-indicator" style="background: #28a745;"></span>
-                    Altitude OA filt
-                </label>
-                <label>
-                    <input type="checkbox" id="show-target-altitude" checked>
-                    <span class="altitude-color-indicator" style="background: #ffc107;"></span>
-                    Target Altitude
-                </label>
-            </div>
-            <div id="altitude-chart-container">
-                <canvas id="altitude-chart"></canvas>
-                <div class="cursor-line" id="cursor-line-altitude" style="display: none;"></div>
+            <h2>USBL Distance</h2>
+            <div id="usbl-distance-chart-container">
+                <canvas id="usbl-distance-chart"></canvas>
+                <div class="cursor-line" id="cursor-line-usbl-distance" style="display: none;"></div>
             </div>
         </div>
+        
+        <div class="panel">
+            <h2>Moteurs (M1-M8)</h2>
+            <div class="motor-controls">
+                <label>
+                    <input type="checkbox" id="show-m1" checked>
+                    <span class="motor-color-indicator" style="background: #007bff;"></span>
+                    M1
+                </label>
+                <label>
+                    <input type="checkbox" id="show-m2" checked>
+                    <span class="motor-color-indicator" style="background: #28a745;"></span>
+                    M2
+                </label>
+                <label>
+                    <input type="checkbox" id="show-m3" checked>
+                    <span class="motor-color-indicator" style="background: #dc3545;"></span>
+                    M3
+                </label>
+                <label>
+                    <input type="checkbox" id="show-m4" checked>
+                    <span class="motor-color-indicator" style="background: #ffc107;"></span>
+                    M4
+                </label>
+                <label>
+                    <input type="checkbox" id="show-m5" checked>
+                    <span class="motor-color-indicator" style="background: #17a2b8;"></span>
+                    M5
+                </label>
+                <label>
+                    <input type="checkbox" id="show-m6" checked>
+                    <span class="motor-color-indicator" style="background: #6f42c1;"></span>
+                    M6
+                </label>
+                <label>
+                    <input type="checkbox" id="show-m7" checked>
+                    <span class="motor-color-indicator" style="background: #fd7e14;"></span>
+                    M7
+                </label>
+                <label>
+                    <input type="checkbox" id="show-m8" checked>
+                    <span class="motor-color-indicator" style="background: #20c997;"></span>
+                    M8
+                </label>
+            </div>
+            <div id="motors-chart-container">
+                <canvas id="motors-chart"></canvas>
+                <div class="cursor-line" id="cursor-line-motors" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Avant / Yaw / Up</h2>
+            <div class="derived-controls">
+                <label>
+                    <input type="checkbox" id="show-avant" checked>
+                    <span class="derived-color-indicator" style="background: #007bff;"></span>
+                    Avant
+                </label>
+                <label>
+                    <input type="checkbox" id="show-yaw" checked>
+                    <span class="derived-color-indicator" style="background: #28a745;"></span>
+                    Yaw
+                </label>
+                <label>
+                    <input type="checkbox" id="show-up" checked>
+                    <span class="derived-color-indicator" style="background: #dc3545;"></span>
+                    Up
+                </label>
+            </div>
+            <div id="derived-chart-container">
+                <canvas id="derived-chart"></canvas>
+                <div class="cursor-line" id="cursor-line-derived" style="display: none;"></div>
+            </div>
+        </div>
+        
     </div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -726,8 +786,14 @@
         let orientationDataFull = {}; // Orientation data (Roll, Pitch, Yaw, Heading) - object with keys: 'Roll', 'Pitch', 'Yaw', 'Heading'
         let waterTempDataFull = []; // Water temperature data (AUV)
         let altitudeDataFull = {}; // Altitude data - object with keys: 'Altitude Kogger', 'Altitude Kogger raw', 'Altitude OA', 'Altitude OA filt'
-        let usblDataFull = []; // USBL sequence data (USV)
-        let usblData = []; // Filtered USBL data
+        let usblBearingDataFull = []; // USBL bearing (azimuth) data (USV)
+        let usblBearingData = []; // Filtered USBL bearing data
+        let usblElevationDataFull = []; // USBL elevation data (USV)
+        let usblElevationData = []; // Filtered USBL elevation data
+        let usblDistanceDataFull = []; // USBL distance data (USV)
+        let usblDistanceData = []; // Filtered USBL distance data
+        let usvFullAuvDataFull = {distance: [], bearing: [], elevation: [], state: []}; // USV full AUV data
+        let usvFullAuvData = {distance: [], bearing: [], elevation: [], state: []}; // Filtered USV full AUV data
         let usvOrderStringToInt = {}; // Mapping string -> int for Order to AUV
         let usvOrderIntToString = {}; // Mapping int -> string for Order to AUV (reverse)
         
@@ -744,7 +810,9 @@
         let orientationYRange = null;
         let waterTempYRange = null;
         let altitudeYRange = null;
-        let usblYRange = null;
+        let usblAzimuthElevationYRange = null; // Y-axis zoom range for USBL azimuth/elevation chart
+        let usblDistanceYRange = null; // Y-axis zoom range for USBL distance chart
+        let usvFullAuvYRange = null; // Y-axis zoom range for USV full AUV chart
         
         // Filtered data (based on displayStartTime and displayEndTime)
         let depthData = [];
@@ -1084,10 +1152,20 @@
         const waterTempContainer = document.getElementById('water-temp-chart-container');
         const waterTempCursorLine = document.getElementById('cursor-line-water-temp');
         
-        const usblCanvas = document.getElementById('usbl-chart');
-        const usblCtx = usblCanvas ? usblCanvas.getContext('2d') : null;
-        const usblContainer = document.getElementById('usbl-chart-container');
-        const usblCursorLine = document.getElementById('cursor-line-usbl');
+        const usblAzimuthElevationCanvas = document.getElementById('usbl-azimuth-elevation-chart');
+        const usblAzimuthElevationCtx = usblAzimuthElevationCanvas ? usblAzimuthElevationCanvas.getContext('2d') : null;
+        const usblAzimuthElevationContainer = document.getElementById('usbl-azimuth-elevation-chart-container');
+        const usblAzimuthElevationCursorLine = document.getElementById('cursor-line-usbl-azimuth-elevation');
+        
+        const usblDistanceCanvas = document.getElementById('usbl-distance-chart');
+        const usblDistanceCtx = usblDistanceCanvas ? usblDistanceCanvas.getContext('2d') : null;
+        const usblDistanceContainer = document.getElementById('usbl-distance-chart-container');
+        const usblDistanceCursorLine = document.getElementById('cursor-line-usbl-distance');
+        
+        const usvFullAuvCanvas = document.getElementById('usv-full-auv-chart');
+        const usvFullAuvCtx = usvFullAuvCanvas ? usvFullAuvCanvas.getContext('2d') : null;
+        const usvFullAuvContainer = document.getElementById('usv-full-auv-chart-container');
+        const usvFullAuvCursorLine = document.getElementById('cursor-line-usv-full-auv');
         
         const altitudeCanvas = document.getElementById('altitude-chart');
         const altitudeCtx = altitudeCanvas ? altitudeCanvas.getContext('2d') : null;
@@ -1351,10 +1429,28 @@
             });
         }
         
-        function resizeUSBLCanvas() {
-            resizeCanvasGeneric(usblCanvas, usblContainer, usblCtx, 'USBL', () => {
-                if (usblData && usblData.length > 0) {
-                    drawUSBLChart();
+        function resizeUSBLAzimuthElevationCanvas() {
+            resizeCanvasGeneric(usblAzimuthElevationCanvas, usblAzimuthElevationContainer, usblAzimuthElevationCtx, 'USBL Azimuth/Elevation', () => {
+                const hasData = (usblBearingData && usblBearingData.length > 0) ||
+                               (usblElevationData && usblElevationData.length > 0);
+                if (hasData) {
+                    drawUSBLAzimuthElevationChart();
+                }
+            });
+        }
+        
+        function resizeUSBLDistanceCanvas() {
+            resizeCanvasGeneric(usblDistanceCanvas, usblDistanceContainer, usblDistanceCtx, 'USBL Distance', () => {
+                if (usblDistanceData && usblDistanceData.length > 0) {
+                    drawUSBLDistanceChart();
+                }
+            });
+        }
+        
+        function resizeUSVFullAuvCanvas() {
+            resizeCanvasGeneric(usvFullAuvCanvas, usvFullAuvContainer, usvFullAuvCtx, 'USV Full AUV', () => {
+                if (usvFullAuvData && (usvFullAuvData.distance.length > 0 || usvFullAuvData.bearing.length > 0 || usvFullAuvData.elevation.length > 0)) {
+                    drawUSVFullAuvChart();
                 }
             });
         }
@@ -1375,6 +1471,9 @@
             resizeBearingPingCanvas();
             resizeOrientationCanvas();
             resizeWaterTempCanvas();
+            resizeUSBLAzimuthElevationCanvas();
+            resizeUSBLDistanceCanvas();
+            resizeUSVFullAuvCanvas();
             resizeAltitudeCanvas();
         });
         // Wait for DOM to be ready
@@ -2415,21 +2514,25 @@
             drawSelectionBox(waterTempCtx, 'waterTemp', padding);
         }
         
-        // Draw USBL chart
-        function drawUSBLChart() {
-            if (!usblCanvas || !usblContainer || !usblCtx) {
-                console.warn('USBL canvas, container, or ctx not available for drawUSBLChart');
+        // Draw USBL Azimuth/Elevation chart
+        function drawUSBLAzimuthElevationChart() {
+            if (!usblAzimuthElevationCanvas || !usblAzimuthElevationContainer || !usblAzimuthElevationCtx) {
+                console.warn('USBL Azimuth/Elevation canvas, container, or ctx not available');
                 return;
             }
             
-            const rect = usblContainer.getBoundingClientRect();
+            const rect = usblAzimuthElevationContainer.getBoundingClientRect();
             
-            if (!usblData || usblData.length === 0) {
-                usblCtx.clearRect(0, 0, usblCanvas.width, usblCanvas.height);
-                usblCtx.fillStyle = '#666';
-                usblCtx.font = '16px sans-serif';
-                usblCtx.textAlign = 'center';
-                usblCtx.fillText('Aucune donnée USBL disponible', rect.width / 2, rect.height / 2);
+            // Check if we have any azimuth or elevation data
+            const hasData = (usblBearingData && usblBearingData.length > 0) ||
+                           (usblElevationData && usblElevationData.length > 0);
+            
+            if (!hasData) {
+                usblAzimuthElevationCtx.clearRect(0, 0, usblAzimuthElevationCanvas.width, usblAzimuthElevationCanvas.height);
+                usblAzimuthElevationCtx.fillStyle = '#666';
+                usblAzimuthElevationCtx.font = '16px sans-serif';
+                usblAzimuthElevationCtx.textAlign = 'center';
+                usblAzimuthElevationCtx.fillText('Aucune donnée USBL Azimuth/Elevation disponible', rect.width / 2, rect.height / 2);
                 return;
             }
             
@@ -2441,38 +2544,137 @@
                 return;
             }
             
-            usblCtx.clearRect(0, 0, usblCanvas.width, usblCanvas.height);
+            usblAzimuthElevationCtx.clearRect(0, 0, usblAzimuthElevationCanvas.width, usblAzimuthElevationCanvas.height);
             
             if (displayStartTime === null || displayEndTime === null) {
-                usblCtx.fillStyle = '#666';
-                usblCtx.font = '16px sans-serif';
-                usblCtx.textAlign = 'center';
-                usblCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                usblAzimuthElevationCtx.fillStyle = '#666';
+                usblAzimuthElevationCtx.font = '16px sans-serif';
+                usblAzimuthElevationCtx.textAlign = 'center';
+                usblAzimuthElevationCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
                 return;
             }
             
             const minTime = displayStartTime;
             const maxTime = displayEndTime;
-            const timeSpan = maxTime - minTime;
             
             // Draw state background zones
-            drawStateBackground(usblCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            drawStateBackground(usblAzimuthElevationCtx, padding, chartWidth, chartHeight, minTime, maxTime);
             
-            // Calculate value range
-            const values = usblData.map(d => d.value).filter(v => v !== null && v !== undefined);
-            if (values.length === 0) {
-                usblCtx.fillStyle = '#666';
-                usblCtx.font = '16px sans-serif';
-                usblCtx.textAlign = 'center';
-                usblCtx.fillText('Aucune donnée USBL dans la plage sélectionnée', rect.width / 2, rect.height / 2);
+            // Collect values for azimuth and elevation to calculate range
+            const allValues = [];
+            if (usblBearingData && usblBearingData.length > 0) {
+                allValues.push(...usblBearingData.map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            if (usblElevationData && usblElevationData.length > 0) {
+                allValues.push(...usblElevationData.map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            
+            if (allValues.length === 0) {
+                usblAzimuthElevationCtx.fillStyle = '#666';
+                usblAzimuthElevationCtx.font = '16px sans-serif';
+                usblAzimuthElevationCtx.textAlign = 'center';
+                usblAzimuthElevationCtx.fillText('Aucune donnée USBL dans la plage sélectionnée', rect.width / 2, rect.height / 2);
                 return;
             }
             
             // Calculate value range - use stored range if available, otherwise calculate
             let adjustedMinValue, adjustedMaxValue;
-            if (usblYRange) {
-                adjustedMinValue = usblYRange.min;
-                adjustedMaxValue = usblYRange.max;
+            if (usblAzimuthElevationYRange) {
+                adjustedMinValue = usblAzimuthElevationYRange.min;
+                adjustedMaxValue = usblAzimuthElevationYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(allValues);
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
+            
+            // Draw axes using utility function
+            drawChartAxes(usblAzimuthElevationCtx, padding, chartWidth, chartHeight);
+            
+            // Draw grid and Y axis labels
+            drawChartGrid(usblAzimuthElevationCtx, padding, chartWidth, chartHeight, 8, adjustedMinValue, adjustedMaxValue,
+                (value) => `${Math.round(value)}`);
+            
+            // Draw time labels
+            drawTimeLabels(usblAzimuthElevationCtx, padding, chartWidth, chartHeight, minTime, maxTime, 8);
+            
+            // Draw USBL curves
+            // Bearing (azimuth) in orange
+            if (usblBearingData && usblBearingData.length > 0) {
+                drawCurve(usblAzimuthElevationCtx, usblBearingData, padding, chartWidth, chartHeight,
+                    minTime, maxTime, adjustedMinValue, adjustedMaxValue, '#ff6b35', 2);
+            }
+            
+            // Elevation in blue
+            if (usblElevationData && usblElevationData.length > 0) {
+                drawCurve(usblAzimuthElevationCtx, usblElevationData, padding, chartWidth, chartHeight,
+                    minTime, maxTime, adjustedMinValue, adjustedMaxValue, '#3f51b5', 2);
+            }
+            
+            // Update cursor line
+            updateCursorLine(usblAzimuthElevationCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(usblAzimuthElevationCtx, 'usbl-azimuth-elevation', padding);
+        }
+        
+        // Draw USBL Distance chart
+        function drawUSBLDistanceChart() {
+            if (!usblDistanceCanvas || !usblDistanceContainer || !usblDistanceCtx) {
+                console.warn('USBL Distance canvas, container, or ctx not available');
+                return;
+            }
+            
+            const rect = usblDistanceContainer.getBoundingClientRect();
+            
+            if (!usblDistanceData || usblDistanceData.length === 0) {
+                usblDistanceCtx.clearRect(0, 0, usblDistanceCanvas.width, usblDistanceCanvas.height);
+                usblDistanceCtx.fillStyle = '#666';
+                usblDistanceCtx.font = '16px sans-serif';
+                usblDistanceCtx.textAlign = 'center';
+                usblDistanceCtx.fillText('Aucune donnée USBL Distance disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                return;
+            }
+            
+            usblDistanceCtx.clearRect(0, 0, usblDistanceCanvas.width, usblDistanceCanvas.height);
+            
+            if (displayStartTime === null || displayEndTime === null) {
+                usblDistanceCtx.fillStyle = '#666';
+                usblDistanceCtx.font = '16px sans-serif';
+                usblDistanceCtx.textAlign = 'center';
+                usblDistanceCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            
+            // Draw state background zones
+            drawStateBackground(usblDistanceCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Calculate value range for distance
+            const values = usblDistanceData.map(d => d.value).filter(v => v !== null && v !== undefined);
+            if (values.length === 0) {
+                usblDistanceCtx.fillStyle = '#666';
+                usblDistanceCtx.font = '16px sans-serif';
+                usblDistanceCtx.textAlign = 'center';
+                usblDistanceCtx.fillText('Aucune donnée USBL Distance dans la plage sélectionnée', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinValue, adjustedMaxValue;
+            if (usblDistanceYRange) {
+                adjustedMinValue = usblDistanceYRange.min;
+                adjustedMaxValue = usblDistanceYRange.max;
             } else {
                 const { min: minValue, max: maxValue } = calculateMinMax(values);
                 adjustedMinValue = Math.floor(minValue);
@@ -2480,25 +2682,145 @@
             }
             
             // Draw axes using utility function
-            drawChartAxes(usblCtx, padding, chartWidth, chartHeight);
+            drawChartAxes(usblDistanceCtx, padding, chartWidth, chartHeight);
             
             // Draw grid and Y axis labels
-            drawChartGrid(usblCtx, padding, chartWidth, chartHeight, 8, adjustedMinValue, adjustedMaxValue,
+            drawChartGrid(usblDistanceCtx, padding, chartWidth, chartHeight, 8, adjustedMinValue, adjustedMaxValue,
                 (value) => `${Math.round(value)}`);
             
             // Draw time labels
-            drawTimeLabels(usblCtx, padding, chartWidth, chartHeight, minTime, maxTime, 8);
+            drawTimeLabels(usblDistanceCtx, padding, chartWidth, chartHeight, minTime, maxTime, 8);
             
-            // Draw USBL sequence curve
-            const usblColor = '#ff6b35';
-            drawCurve(usblCtx, usblData, padding, chartWidth, chartHeight,
-                minTime, maxTime, adjustedMinValue, adjustedMaxValue, usblColor, 2);
+            // Draw distance curve in green
+            drawCurve(usblDistanceCtx, usblDistanceData, padding, chartWidth, chartHeight,
+                minTime, maxTime, adjustedMinValue, adjustedMaxValue, '#4caf50', 2);
             
             // Update cursor line
-            updateCursorLine(usblCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            updateCursorLine(usblDistanceCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
             
             // Draw selection box if dragging
-            drawSelectionBox(usblCtx, 'usbl', padding);
+            drawSelectionBox(usblDistanceCtx, 'usbl-distance', padding);
+        }
+        
+        // Draw USV Full AUV chart
+        function drawUSVFullAuvChart() {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:2705',message:'drawUSVFullAuvChart called',data:{hasCanvas:!!usvFullAuvCanvas,hasContainer:!!usvFullAuvContainer,hasCtx:!!usvFullAuvCtx},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
+            if (!usvFullAuvCanvas || !usvFullAuvContainer || !usvFullAuvCtx) {
+                console.warn('USV Full AUV canvas, container, or ctx not available');
+                return;
+            }
+            
+            const rect = usvFullAuvContainer.getBoundingClientRect();
+            
+            const hasData = usvFullAuvData && (
+                (usvFullAuvData.distance && usvFullAuvData.distance.length > 0) ||
+                (usvFullAuvData.bearing && usvFullAuvData.bearing.length > 0) ||
+                (usvFullAuvData.elevation && usvFullAuvData.elevation.length > 0)
+            );
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:2713',message:'Checking hasData',data:{hasData:hasData,distance:usvFullAuvData?.distance?.length||0,bearing:usvFullAuvData?.bearing?.length||0,elevation:usvFullAuvData?.elevation?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'E'})}).catch(()=>{});
+            // #endregion
+            
+            if (!hasData) {
+                usvFullAuvCtx.clearRect(0, 0, usvFullAuvCanvas.width, usvFullAuvCanvas.height);
+                usvFullAuvCtx.fillStyle = '#666';
+                usvFullAuvCtx.font = '16px sans-serif';
+                usvFullAuvCtx.textAlign = 'center';
+                usvFullAuvCtx.fillText('Aucune donnée USV Full AUV disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                return;
+            }
+            
+            usvFullAuvCtx.clearRect(0, 0, usvFullAuvCanvas.width, usvFullAuvCanvas.height);
+            
+            if (displayStartTime === null || displayEndTime === null) {
+                usvFullAuvCtx.fillStyle = '#666';
+                usvFullAuvCtx.font = '16px sans-serif';
+                usvFullAuvCtx.textAlign = 'center';
+                usvFullAuvCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            
+            // Draw state background zones
+            drawStateBackground(usvFullAuvCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Collect all values from visible series
+            let allValues = [];
+            const showDistance = document.getElementById('show-usv-full-distance')?.checked !== false;
+            const showBearing = document.getElementById('show-usv-full-bearing')?.checked !== false;
+            const showElevation = document.getElementById('show-usv-full-elevation')?.checked !== false;
+            
+            if (showDistance && usvFullAuvData.distance && Array.isArray(usvFullAuvData.distance)) {
+                allValues = allValues.concat(usvFullAuvData.distance.map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            if (showBearing && usvFullAuvData.bearing && Array.isArray(usvFullAuvData.bearing)) {
+                allValues = allValues.concat(usvFullAuvData.bearing.map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            if (showElevation && usvFullAuvData.elevation && Array.isArray(usvFullAuvData.elevation)) {
+                allValues = allValues.concat(usvFullAuvData.elevation.map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            
+            if (allValues.length === 0) {
+                usvFullAuvCtx.fillStyle = '#666';
+                usvFullAuvCtx.font = '16px sans-serif';
+                usvFullAuvCtx.textAlign = 'center';
+                usvFullAuvCtx.fillText('Aucune donnée USV Full AUV dans la plage sélectionnée', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            // Calculate value range
+            let adjustedMinValue, adjustedMaxValue;
+            if (usvFullAuvYRange) {
+                adjustedMinValue = usvFullAuvYRange.min;
+                adjustedMaxValue = usvFullAuvYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(allValues);
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
+            
+            // Draw axes using utility function
+            drawChartAxes(usvFullAuvCtx, padding, chartWidth, chartHeight);
+            
+            // Draw grid and Y axis labels
+            drawChartGrid(usvFullAuvCtx, padding, chartWidth, chartHeight, 8, adjustedMinValue, adjustedMaxValue,
+                (value) => `${Math.round(value)}`);
+            
+            // Draw time labels
+            drawTimeLabels(usvFullAuvCtx, padding, chartWidth, chartHeight, minTime, maxTime, 8);
+            
+            // Draw curves for each visible series
+            if (showDistance && usvFullAuvData.distance && usvFullAuvData.distance.length > 0) {
+                drawCurve(usvFullAuvCtx, usvFullAuvData.distance, padding, chartWidth, chartHeight,
+                    minTime, maxTime, adjustedMinValue, adjustedMaxValue, '#007bff', 2);
+            }
+            if (showBearing && usvFullAuvData.bearing && usvFullAuvData.bearing.length > 0) {
+                drawCurve(usvFullAuvCtx, usvFullAuvData.bearing, padding, chartWidth, chartHeight,
+                    minTime, maxTime, adjustedMinValue, adjustedMaxValue, '#28a745', 2);
+            }
+            if (showElevation && usvFullAuvData.elevation && usvFullAuvData.elevation.length > 0) {
+                drawCurve(usvFullAuvCtx, usvFullAuvData.elevation, padding, chartWidth, chartHeight,
+                    minTime, maxTime, adjustedMinValue, adjustedMaxValue, '#dc3545', 2);
+            }
+            
+            // Update cursor line
+            updateCursorLine(usvFullAuvCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+            
+            // Draw selection box if dragging
+            drawSelectionBox(usvFullAuvCtx, 'usv-full-auv', padding);
         }
         
         // Draw altitude chart
@@ -2751,6 +3073,97 @@
                 }, 100);
             } catch (error) {
                 console.error('Error loading altitude data:', error);
+            }
+        }
+        
+        // Load USBL data
+        async function loadUSBLData() {
+            try {
+                // Load bearing (azimuth) data
+                const bearingResponse = await fetch(`/api/run/${runId}/usbl_bearing`);
+                if (bearingResponse.ok) {
+                    usblBearingDataFull = await bearingResponse.json();
+                    console.log(`Loaded ${usblBearingDataFull.length} USBL bearing points (full)`);
+                }
+                
+                // Load elevation data
+                const elevationResponse = await fetch(`/api/run/${runId}/usbl_elevation`);
+                if (elevationResponse.ok) {
+                    usblElevationDataFull = await elevationResponse.json();
+                    console.log(`Loaded ${usblElevationDataFull.length} USBL elevation points (full)`);
+                }
+                
+                // Load distance data
+                const distanceResponse = await fetch(`/api/run/${runId}/usbl_distance`);
+                if (distanceResponse.ok) {
+                    usblDistanceDataFull = await distanceResponse.json();
+                    console.log(`Loaded ${usblDistanceDataFull.length} USBL distance points (full)`);
+                }
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${usblBearingData.length} bearing, ${usblElevationData.length} elevation, ${usblDistanceData.length} distance points`);
+                
+                // Ensure canvases are properly sized before drawing
+                resizeUSBLAzimuthElevationCanvas();
+                resizeUSBLDistanceCanvas();
+                // Wait a bit for canvases to be ready
+                setTimeout(() => {
+                    drawUSBLAzimuthElevationChart();
+                    drawUSBLDistanceChart();
+                }, 100);
+            } catch (error) {
+                console.error('Error loading USBL data:', error);
+            }
+        }
+        
+        // Load USV Full AUV data
+        async function loadUSVFullAuvData() {
+            try {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3115',message:'loadUSVFullAuvData called',data:{runId:runId},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
+                const response = await fetch(`/api/run/${runId}/usv_full_auv_data`);
+                if (!response.ok) {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3117',message:'HTTP error',data:{status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
+                    // #endregion
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                usvFullAuvDataFull = await response.json();
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3119',message:'Data loaded',data:{distance:usvFullAuvDataFull.distance?.length||0,bearing:usvFullAuvDataFull.bearing?.length||0,elevation:usvFullAuvDataFull.elevation?.length||0,state:usvFullAuvDataFull.state?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
+                console.log('Loaded USV Full AUV data (full):', {
+                    distance: usvFullAuvDataFull.distance.length,
+                    bearing: usvFullAuvDataFull.bearing.length,
+                    elevation: usvFullAuvDataFull.elevation.length,
+                    state: usvFullAuvDataFull.state.length
+                });
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3128',message:'After filter',data:{distance:usvFullAuvData.distance?.length||0,bearing:usvFullAuvData.bearing?.length||0,elevation:usvFullAuvData.elevation?.length||0,state:usvFullAuvData.state?.length||0,displayStartTime:displayStartTime,displayEndTime:displayEndTime},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                console.log('Filtered USV Full AUV data:', {
+                    distance: usvFullAuvData.distance.length,
+                    bearing: usvFullAuvData.bearing.length,
+                    elevation: usvFullAuvData.elevation.length,
+                    state: usvFullAuvData.state.length
+                });
+                
+                // Ensure canvas is properly sized before drawing
+                resizeUSVFullAuvCanvas();
+                // Wait a bit for canvas to be ready
+                setTimeout(() => {
+                    drawUSVFullAuvChart();
+                }, 100);
+            } catch (error) {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3142',message:'Error loading data',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
+                console.error('Error loading USV Full AUV data:', error);
             }
         }
         
@@ -3416,11 +3829,47 @@
                         maxValue = Math.ceil(max);
                     }
                     break;
-                case 'usbl':
-                    if (usblYRange) return usblYRange;
-                    const usblValues = usblData.map(d => d.value || 0);
-                    if (usblValues.length > 0) {
-                        const {min, max} = calculateMinMax(usblValues);
+                case 'usbl-azimuth-elevation':
+                    if (usblAzimuthElevationYRange) return usblAzimuthElevationYRange;
+                    let usblAzimuthElevationValues = [];
+                    if (usblBearingData && usblBearingData.length > 0) {
+                        usblAzimuthElevationValues.push(...usblBearingData.map(d => d.value || 0));
+                    }
+                    if (usblElevationData && usblElevationData.length > 0) {
+                        usblAzimuthElevationValues.push(...usblElevationData.map(d => d.value || 0));
+                    }
+                    if (usblAzimuthElevationValues.length > 0) {
+                        const {min, max} = calculateMinMax(usblAzimuthElevationValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
+                case 'usbl-distance':
+                    if (usblDistanceYRange) return usblDistanceYRange;
+                    const usblDistanceValues = usblDistanceData.map(d => d.value || 0);
+                    if (usblDistanceValues.length > 0) {
+                        const {min, max} = calculateMinMax(usblDistanceValues);
+                        minValue = Math.floor(min);
+                        maxValue = Math.ceil(max);
+                    }
+                    break;
+                case 'usv-full-auv':
+                    if (usvFullAuvYRange) return usvFullAuvYRange;
+                    let allUsvFullAuvValues = [];
+                    const showDistance = document.getElementById('show-usv-full-distance')?.checked !== false;
+                    const showBearing = document.getElementById('show-usv-full-bearing')?.checked !== false;
+                    const showElevation = document.getElementById('show-usv-full-elevation')?.checked !== false;
+                    if (showDistance && usvFullAuvData.distance && Array.isArray(usvFullAuvData.distance)) {
+                        allUsvFullAuvValues = allUsvFullAuvValues.concat(usvFullAuvData.distance.map(d => d.value).filter(v => v !== null && v !== undefined));
+                    }
+                    if (showBearing && usvFullAuvData.bearing && Array.isArray(usvFullAuvData.bearing)) {
+                        allUsvFullAuvValues = allUsvFullAuvValues.concat(usvFullAuvData.bearing.map(d => d.value).filter(v => v !== null && v !== undefined));
+                    }
+                    if (showElevation && usvFullAuvData.elevation && Array.isArray(usvFullAuvData.elevation)) {
+                        allUsvFullAuvValues = allUsvFullAuvValues.concat(usvFullAuvData.elevation.map(d => d.value).filter(v => v !== null && v !== undefined));
+                    }
+                    if (allUsvFullAuvValues.length > 0) {
+                        const {min, max} = calculateMinMax(allUsvFullAuvValues);
                         minValue = Math.floor(min);
                         maxValue = Math.ceil(max);
                     }
@@ -3435,15 +3884,6 @@
                     });
                     if (allAltitudeValues.length > 0) {
                         const {min, max} = calculateMinMax(allAltitudeValues);
-                        minValue = Math.floor(min);
-                        maxValue = Math.ceil(max);
-                    }
-                    break;
-                case 'usbl':
-                    if (usblYRange) return usblYRange;
-                    const usblValues = usblData.map(d => d.value || 0);
-                    if (usblValues.length > 0) {
-                        const {min, max} = calculateMinMax(usblValues);
                         minValue = Math.floor(min);
                         maxValue = Math.ceil(max);
                     }
@@ -3463,7 +3903,9 @@
                 case 'bearingPing': drawBearingPingChart(); break;
                 case 'orientation': drawOrientationChart(); break;
                 case 'waterTemp': drawWaterTempChart(); break;
-                case 'usbl': drawUSBLChart(); break;
+                case 'usbl-azimuth-elevation': drawUSBLAzimuthElevationChart(); break;
+                case 'usbl-distance': drawUSBLDistanceChart(); break;
+                case 'usv-full-auv': drawUSVFullAuvChart(); break;
                 case 'altitude': drawAltitudeChart(); break;
             }
         }
@@ -3477,7 +3919,9 @@
             drawBearingPingChart();
             drawOrientationChart();
             drawWaterTempChart();
-            drawUSBLChart();
+            drawUSBLAzimuthElevationChart();
+            drawUSBLDistanceChart();
+            drawUSVFullAuvChart();
             drawAltitudeChart();
             updateMapTrajectory();
             updateStatistics();
@@ -3586,7 +4030,9 @@
                 case 'bearingPing': bearingPingYRange = {min: minValue, max: maxValue}; break;
                 case 'orientation': orientationYRange = {min: minValue, max: maxValue}; break;
                 case 'waterTemp': waterTempYRange = {min: minValue, max: maxValue}; break;
-                case 'usbl': usblYRange = {min: minValue, max: maxValue}; break;
+                case 'usbl-azimuth-elevation': usblAzimuthElevationYRange = {min: minValue, max: maxValue}; break;
+                case 'usbl-distance': usblDistanceYRange = {min: minValue, max: maxValue}; break;
+                case 'usv-full-auv': usvFullAuvYRange = {min: minValue, max: maxValue}; break;
                 case 'altitude': altitudeYRange = {min: minValue, max: maxValue}; break;
             }
             console.log('[DEBUG] YRange set for', chartId, ':', {min: minValue, max: maxValue});
@@ -3633,7 +4079,9 @@
                         case 'bearingPing': bearingPingYRange = null; break;
                         case 'orientation': orientationYRange = null; break;
                         case 'waterTemp': waterTempYRange = null; break;
-                        case 'usbl': usblYRange = null; break;
+                        case 'usbl-azimuth-elevation': usblAzimuthElevationYRange = null; break;
+                        case 'usbl-distance': usblDistanceYRange = null; break;
+                        case 'usv-full-auv': usvFullAuvYRange = null; break;
                         case 'altitude': altitudeYRange = null; break;
                     }
                 } else {
@@ -3645,7 +4093,8 @@
                     bearingPingYRange = null;
                     orientationYRange = null;
                     waterTempYRange = null;
-                    usblYRange = null;
+                    usblAzimuthElevationYRange = null;
+                    usblDistanceYRange = null;
                     altitudeYRange = null;
                 }
             }
@@ -3707,6 +4156,7 @@
                 if (bearingPingCursorLine) bearingPingCursorLine.style.display = 'none';
                 if (orientationCursorLine) orientationCursorLine.style.display = 'none';
                 if (waterTempCursorLine) waterTempCursorLine.style.display = 'none';
+                if (usvFullAuvCursorLine) usvFullAuvCursorLine.style.display = 'none';
                 if (altitudeCursorLine) altitudeCursorLine.style.display = 'none';
                 if (timeDisplay) timeDisplay.style.display = 'none';
                 
@@ -3718,6 +4168,7 @@
                 drawBearingPingChart();
                 drawOrientationChart();
                 drawWaterTempChart();
+                drawUSVFullAuvChart();
                 drawAltitudeChart();
                 
                 // Set timeout to cancel if no second click within 3 seconds
@@ -3734,6 +4185,7 @@
                         drawBearingPingChart();
                         drawOrientationChart();
                         drawWaterTempChart();
+                        drawUSVFullAuvChart();
                     }
                 }, 3000);
             } else {
@@ -3768,6 +4220,7 @@
                     drawBearingPingChart();
                     drawOrientationChart();
                     drawWaterTempChart();
+                    drawUSVFullAuvChart();
                 } else {
                     // Update display range (this is the zoom)
                     displayStartTime = startTime;
@@ -3791,6 +4244,7 @@
                     drawBearingPingChart();
                     drawOrientationChart();
                     drawWaterTempChart();
+                    drawUSVFullAuvChart();
                     updateMapTrajectory();
                     updateTimeRangeDisplay();
                 }
@@ -3810,9 +4264,11 @@
                     drawDerivedChart();
                     drawStateChart();
                     drawBearingPingChart();
-                    drawOrientationChart();
-                    drawWaterTempChart();
-                    updateMapMarker();
+                drawOrientationChart();
+                drawWaterTempChart();
+                drawUSVFullAuvChart();
+                drawAltitudeChart();
+                updateMapMarker();
                 }
             }
         }
@@ -3971,7 +4427,7 @@
             
             // Mouseleave: clear hover
             canvasEl.addEventListener('mouseleave', () => {
-                if (!isDragging && !isRightClickDragging) {
+                if (!isDragging) {
                     handleZoomMouseLeave();
                 }
             });
@@ -3985,7 +4441,9 @@
         attachZoomListeners(bearingPingCanvas, bearingPingContainer, 'bearingPing');
         attachZoomListeners(orientationCanvas, orientationContainer, 'orientation');
         attachZoomListeners(waterTempCanvas, waterTempContainer, 'waterTemp');
-        attachZoomListeners(usblCanvas, usblContainer, 'usbl');
+        attachZoomListeners(usblAzimuthElevationCanvas, usblAzimuthElevationContainer, 'usbl-azimuth-elevation');
+        attachZoomListeners(usblDistanceCanvas, usblDistanceContainer, 'usbl-distance');
+        attachZoomListeners(usvFullAuvCanvas, usvFullAuvContainer, 'usv-full-auv');
         attachZoomListeners(altitudeCanvas, altitudeContainer, 'altitude');
         
         // Filter data based on displayStartTime and displayEndTime
@@ -4047,8 +4505,30 @@
             }
             
             // Filter USBL data
-            if (usblDataFull && Array.isArray(usblDataFull)) {
-                usblData = filterArrayByTimeRange(usblDataFull, displayStartTime, displayEndTime);
+            if (usblBearingDataFull && Array.isArray(usblBearingDataFull)) {
+                usblBearingData = filterArrayByTimeRange(usblBearingDataFull, displayStartTime, displayEndTime);
+            }
+            if (usblElevationDataFull && Array.isArray(usblElevationDataFull)) {
+                usblElevationData = filterArrayByTimeRange(usblElevationDataFull, displayStartTime, displayEndTime);
+            }
+            if (usblDistanceDataFull && Array.isArray(usblDistanceDataFull)) {
+                usblDistanceData = filterArrayByTimeRange(usblDistanceDataFull, displayStartTime, displayEndTime);
+            }
+            
+            // Filter USV Full AUV data
+            if (usvFullAuvDataFull && typeof usvFullAuvDataFull === 'object') {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:4487',message:'Before filter',data:{distanceFull:usvFullAuvDataFull.distance?.length||0,bearingFull:usvFullAuvDataFull.bearing?.length||0,elevationFull:usvFullAuvDataFull.elevation?.length||0,displayStartTime:displayStartTime,displayEndTime:displayEndTime},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                usvFullAuvData = {
+                    distance: filterArrayByTimeRange(usvFullAuvDataFull.distance || [], displayStartTime, displayEndTime),
+                    bearing: filterArrayByTimeRange(usvFullAuvDataFull.bearing || [], displayStartTime, displayEndTime),
+                    elevation: filterArrayByTimeRange(usvFullAuvDataFull.elevation || [], displayStartTime, displayEndTime),
+                    state: filterArrayByTimeRange(usvFullAuvDataFull.state || [], displayStartTime, displayEndTime)
+                };
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:4493',message:'After filter',data:{distance:usvFullAuvData.distance?.length||0,bearing:usvFullAuvData.bearing?.length||0,elevation:usvFullAuvData.elevation?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
             }
             
             // Filter altitude data
@@ -4498,6 +4978,28 @@
             });
         }
         
+        // USV Full AUV visibility event listeners
+        const showUsvFullDistanceEl = document.getElementById('show-usv-full-distance');
+        if (showUsvFullDistanceEl) {
+            showUsvFullDistanceEl.addEventListener('change', (e) => {
+                drawUSVFullAuvChart();
+            });
+        }
+        
+        const showUsvFullBearingEl = document.getElementById('show-usv-full-bearing');
+        if (showUsvFullBearingEl) {
+            showUsvFullBearingEl.addEventListener('change', (e) => {
+                drawUSVFullAuvChart();
+            });
+        }
+        
+        const showUsvFullElevationEl = document.getElementById('show-usv-full-elevation');
+        if (showUsvFullElevationEl) {
+            showUsvFullElevationEl.addEventListener('change', (e) => {
+                drawUSVFullAuvChart();
+            });
+        }
+        
         // Initialize display range with run times immediately
         if (runStartTime && runEndTime) {
             displayStartTime = runStartTime.getTime();
@@ -4528,6 +5030,8 @@
             console.log('loadAllData: Altitude data loaded');
             await loadUSBLData();
             console.log('loadAllData: USBL data loaded');
+            await loadUSVFullAuvData();
+            console.log('loadAllData: USV Full AUV data loaded');
             await loadUSVStateData();
             console.log('loadAllData: USV State data loaded');
             await loadUSVOrderData();
@@ -4543,6 +5047,9 @@
             resizeBearingPingCanvas();
             resizeOrientationCanvas();
             resizeWaterTempCanvas();
+            resizeUSBLAzimuthElevationCanvas();
+            resizeUSBLDistanceCanvas();
+            resizeUSVFullAuvCanvas();
             resizeAltitudeCanvas();
             
             // Wait a bit for canvases to be ready, then draw all charts
@@ -4562,7 +5069,9 @@
                     drawBearingPingChart();
                     drawOrientationChart();
                     drawWaterTempChart();
-                    drawUSBLChart();
+                    drawUSBLAzimuthElevationChart();
+                    drawUSBLDistanceChart();
+                    drawUSVFullAuvChart();
                     drawAltitudeChart();
                     updateMapTrajectory();
                     updateTimeRangeDisplay();

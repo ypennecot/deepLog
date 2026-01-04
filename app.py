@@ -46,6 +46,11 @@ def index():
     """Main page showing data tables."""
     return render_template('index.html')
 
+@app.route('/settings')
+def settings():
+    """Page showing settings logs comparison across runs."""
+    return render_template('settings.html')
+
 @app.route('/run/<int:run_id>')
 def run_detail(run_id):
     """Page showing detailed analysis of a specific AUV run."""
@@ -1061,7 +1066,7 @@ def process_import_files(import_id, temp_dir):
         
         # Import using the existing import_logs module
         sys.path.insert(0, str(Path(__file__).parent / 'database'))
-        from import_logs import import_navigation_file, import_settings_file, import_usbl_file, extract_vehicle_info
+        from import_logs import import_navigation_file, import_settings_file, import_usbl_file, import_usv_full_file, extract_vehicle_info
         
         conn = get_db_connection()
         files_processed = 0
@@ -1069,12 +1074,13 @@ def process_import_files(import_id, temp_dir):
         files_skipped = 0
         errors = []
         
-        # Use rglob to find all navigation, settings, and USBL files recursively
+        # Use rglob to find all navigation, settings, USBL, and full files recursively
         temp_path = Path(temp_dir)
         nav_files = list(temp_path.rglob('*navigation*.csv'))
         settings_files = list(temp_path.rglob('*settings*.csv'))
         usbl_files = list(temp_path.rglob('*usbl*.csv'))
-        all_files = nav_files + settings_files + usbl_files
+        full_files = list(temp_path.rglob('*full*.csv'))
+        all_files = nav_files + settings_files + usbl_files + full_files
         total_files = len(all_files)
         
         with import_status_lock:
@@ -1219,6 +1225,62 @@ def process_import_files(import_id, temp_dir):
                     import_status[import_id]['current_file_bytes_processed'] = 0
                     import_status[import_id]['current_file_bytes_total'] = 0
         
+        # Import USV full files
+        for full_file in full_files:
+            # Create file_progress dict to track progress for this file
+            file_progress = {'bytes_processed': 0, 'bytes_total': 0, 'estimated_total_lines': None}
+            
+            try:
+                with import_status_lock:
+                    import_status[import_id]['current_file'] = full_file.name
+                    import_status[import_id]['file_index'] = files_processed + 1
+                    import_status[import_id]['current_file_bytes_processed'] = 0
+                    import_status[import_id]['current_file_bytes_total'] = 0
+                
+                # Start a thread to periodically update import_status with file progress
+                progress_update_active = threading.Event()
+                progress_update_active.set()
+                
+                def update_progress_periodically():
+                    while progress_update_active.is_set():
+                        with import_status_lock:
+                            if import_id in import_status:
+                                import_status[import_id]['current_file_bytes_processed'] = file_progress.get('bytes_processed', 0)
+                                import_status[import_id]['current_file_bytes_total'] = file_progress.get('bytes_total', 0)
+                        time.sleep(0.2)  # Update every 200ms
+                
+                progress_thread = threading.Thread(target=update_progress_periodically, daemon=True)
+                progress_thread.start()
+                
+                result = import_usv_full_file(full_file, conn, file_progress)
+                
+                # Stop progress update thread
+                progress_update_active.clear()
+                progress_thread.join(timeout=0.5)
+                
+                # Final update
+                with import_status_lock:
+                    if import_id in import_status:
+                        import_status[import_id]['current_file_bytes_processed'] = file_progress.get('bytes_processed', 0)
+                        import_status[import_id]['current_file_bytes_total'] = file_progress.get('bytes_total', 0)
+                
+                if result:
+                    files_imported += 1
+                else:
+                    files_skipped += 1
+            except Exception as e:
+                error_msg = f"Error importing {full_file.name}: {str(e)}"
+                print(error_msg)
+                errors.append(error_msg)
+            finally:
+                files_processed += 1
+                with import_status_lock:
+                    import_status[import_id]['files_processed'] = files_processed
+                    import_status[import_id]['files_imported'] = files_imported
+                    import_status[import_id]['files_skipped'] = files_skipped
+                    import_status[import_id]['current_file_bytes_processed'] = 0
+                    import_status[import_id]['current_file_bytes_total'] = 0
+        
         conn.close()
         
         # Build message
@@ -1326,9 +1388,9 @@ def reset_database():
             'message': f'Erreur lors du reset: {str(e)}'
         }), 500
 
-@app.route('/api/run/<int:run_id>/usbl_sequence')
-def get_run_usbl_sequence(run_id):
-    """API endpoint to get USBL sequence data for the time period of an AUV run."""
+@app.route('/api/run/<int:run_id>/usbl_bearing')
+def get_run_usbl_bearing(run_id):
+    """API endpoint to get USBL bearing (azimuth) data for the time period of an AUV run."""
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -1347,7 +1409,7 @@ def get_run_usbl_sequence(run_id):
         start_time = run_info['first_timestamp']
         end_time = run_info['last_timestamp']
         
-        # Get USBL sequence data for this time period
+        # Get USBL bearing data for this time period
         query = """
             SELECT 
                 le.time,
@@ -1355,21 +1417,213 @@ def get_run_usbl_sequence(run_id):
             FROM log_entries le
             JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
             WHERE le.vehicle_type = 'USV'
-              AND dtc.data_type = 'USBL_Sequence'
+              AND dtc.data_type = 'USBL_Bearing'
               AND le.time >= %s
               AND le.time <= %s
             ORDER BY le.time ASC
         """
         cursor.execute(query, (start_time, end_time))
-        sequence_data = cursor.fetchall()
+        bearing_data = cursor.fetchall()
         
         # Convert to list with ISO timestamps
         result = []
-        for row in sequence_data:
+        for row in bearing_data:
             entry = dict(row)
             if entry['time']:
                 entry['time'] = entry['time'].isoformat()
             result.append(entry)
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/usbl_elevation')
+def get_run_usbl_elevation(run_id):
+    """API endpoint to get USBL elevation data for the time period of an AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # First, get the time range of the AUV run
+        cursor.execute("""
+            SELECT first_timestamp, last_timestamp
+            FROM log_files
+            WHERE id = %s AND vehicle_type = 'AUV'
+        """, (run_id,))
+        
+        run_info = cursor.fetchone()
+        if not run_info:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        start_time = run_info['first_timestamp']
+        end_time = run_info['last_timestamp']
+        
+        # Get USBL elevation data for this time period
+        query = """
+            SELECT 
+                le.time,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type = 'USBL_Elevation'
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, (start_time, end_time))
+        elevation_data = cursor.fetchall()
+        
+        # Convert to list with ISO timestamps
+        result = []
+        for row in elevation_data:
+            entry = dict(row)
+            if entry['time']:
+                entry['time'] = entry['time'].isoformat()
+            result.append(entry)
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/usbl_distance')
+def get_run_usbl_distance(run_id):
+    """API endpoint to get USBL distance data for the time period of an AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # First, get the time range of the AUV run
+        cursor.execute("""
+            SELECT first_timestamp, last_timestamp
+            FROM log_files
+            WHERE id = %s AND vehicle_type = 'AUV'
+        """, (run_id,))
+        
+        run_info = cursor.fetchone()
+        if not run_info:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        start_time = run_info['first_timestamp']
+        end_time = run_info['last_timestamp']
+        
+        # Get USBL distance data for this time period
+        query = """
+            SELECT 
+                le.time,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type = 'USBL_Distance'
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, (start_time, end_time))
+        distance_data = cursor.fetchall()
+        
+        # Convert to list with ISO timestamps
+        result = []
+        for row in distance_data:
+            entry = dict(row)
+            if entry['time']:
+                entry['time'] = entry['time'].isoformat()
+            result.append(entry)
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/usv_full_auv_data')
+def get_run_usv_full_auv_data(run_id):
+    """API endpoint to get USV full log AUV tracking data for the time period of an AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # First, get the time range of the AUV run
+        cursor.execute("""
+            SELECT first_timestamp, last_timestamp, vehicle_id
+            FROM log_files
+            WHERE id = %s AND vehicle_type = 'AUV'
+        """, (run_id,))
+        
+        run_info = cursor.fetchone()
+        if not run_info:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        start_time = run_info['first_timestamp']
+        end_time = run_info['last_timestamp']
+        auv_vehicle_id = run_info['vehicle_id']  # e.g., 'AUV005'
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:1562","message":"API called","data":{"run_id":run_id,"start_time":str(start_time),"end_time":str(end_time),"auv_vehicle_id":auv_vehicle_id},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Get USV full AUV data for this time period
+        # Query for distance, bearing, elevation, and state
+        # Note: We don't filter by vehicle_id because USV Full logs store AUV IDs as "AUV0", "AUV1", etc.
+        # which may not match the run's vehicle_id (e.g., "AUV005"). We rely on time range filtering only.
+        query = """
+            SELECT 
+                le.time,
+                dtc.data_type,
+                le.value,
+                le.vehicle_id as auv_id
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'AUV'
+              AND dtc.data_type IN ('USV_FULL_AUV_Distance', 'USV_FULL_AUV_Bearing', 
+                                     'USV_FULL_AUV_Elevation', 'USV_FULL_AUV_State')
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC, dtc.data_type ASC
+        """
+        cursor.execute(query, (start_time, end_time))
+        data = cursor.fetchall()
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:1585","message":"Query executed","data":{"row_count":len(data)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Group data by type
+        result = {
+            'distance': [],
+            'bearing': [],
+            'elevation': [],
+            'state': []
+        }
+        
+        for row in data:
+            entry = {
+                'time': row['time'].isoformat() if row['time'] else None,
+                'value': row['value'],
+                'auv_id': row['auv_id']
+            }
+            
+            data_type = row['data_type']
+            if data_type == 'USV_FULL_AUV_Distance':
+                result['distance'].append(entry)
+            elif data_type == 'USV_FULL_AUV_Bearing':
+                result['bearing'].append(entry)
+            elif data_type == 'USV_FULL_AUV_Elevation':
+                result['elevation'].append(entry)
+            elif data_type == 'USV_FULL_AUV_State':
+                result['state'].append(entry)
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:1615","message":"Returning result","data":{"distance_count":len(result['distance']),"bearing_count":len(result['bearing']),"elevation_count":len(result['elevation']),"state_count":len(result['state'])},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
         
         return jsonify(result)
         
@@ -1429,6 +1683,190 @@ def get_run_usv_order(run_id):
                 break  # Found data, stop trying other names
         
         return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/settings')
+def get_settings():
+    """API endpoint to get settings organized by runs for comparison."""
+    # #region agent log
+    import json
+    with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1544","message":"API /api/settings called","data":{"vehicle_type":request.args.get('vehicle_type', 'AUV')},"timestamp":int(time.time()*1000)}) + '\n')
+    # #endregion
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        vehicle_type = request.args.get('vehicle_type', 'AUV')
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1552","message":"Checking settings_files in DB","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # First, check if settings_files exist for this vehicle type
+        cursor.execute("""
+            SELECT COUNT(*) as count, 
+                   COUNT(CASE WHEN import_status = 'completed' THEN 1 END) as completed_count
+            FROM settings_files
+            WHERE vehicle_type = %s
+        """, (vehicle_type,))
+        settings_count = cursor.fetchone()
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1562","message":"Settings files count","data":{"total":settings_count['count'],"completed":settings_count['completed_count']},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Get all runs for this vehicle type with their associated settings files
+        query = """
+            SELECT 
+                lf.id as run_id,
+                lf.filename as run_filename,
+                lf.first_timestamp,
+                lf.vehicle_id,
+                sf.id as settings_file_id,
+                sf.filename as settings_filename,
+                sf.import_completed_at
+            FROM log_files lf
+            LEFT JOIN LATERAL (
+                SELECT sf.id, sf.filename, sf.import_completed_at
+                FROM settings_files sf
+                WHERE sf.vehicle_type = lf.vehicle_type 
+                    AND sf.vehicle_id = lf.vehicle_id
+                    AND sf.import_completed_at <= lf.first_timestamp
+                    AND sf.import_status = 'completed'
+                ORDER BY sf.import_completed_at DESC
+                LIMIT 1
+            ) sf ON true
+            WHERE lf.vehicle_type = %s
+                AND lf.import_status = 'completed'
+                AND lf.first_timestamp IS NOT NULL
+            ORDER BY lf.first_timestamp ASC
+        """
+        cursor.execute(query, (vehicle_type,))
+        runs_data = cursor.fetchall()
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1590","message":"Runs query result","data":{"runs_found":len(runs_data),"runs_with_settings":sum(1 for r in runs_data if r['settings_file_id'])},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # #region agent log - Debug: Check settings files and runs timestamps
+        cursor.execute("""
+            SELECT id, filename, vehicle_type, vehicle_id, import_completed_at, import_status
+            FROM settings_files
+            WHERE vehicle_type = %s AND import_status = 'completed'
+            ORDER BY import_completed_at DESC
+            LIMIT 5
+        """, (vehicle_type,))
+        sample_settings = cursor.fetchall()
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            settings_list = []
+            for s in sample_settings:
+                settings_list.append({
+                    "id": s['id'],
+                    "filename": s['filename'],
+                    "vehicle_id": s['vehicle_id'],
+                    "import_completed_at": s['import_completed_at'].isoformat() if s['import_completed_at'] else None
+                })
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1610","message":"Sample settings files","data":{"settings":settings_list},"timestamp":int(time.time()*1000)}) + '\n')
+        
+        if runs_data:
+            sample_runs = []
+            for r in runs_data[:3]:
+                sample_runs.append({
+                    "run_id": r['run_id'],
+                    "filename": r['run_filename'],
+                    "vehicle_id": r['vehicle_id'],
+                    "first_timestamp": r['first_timestamp'].isoformat() if r['first_timestamp'] else None,
+                    "settings_file_id": r['settings_file_id']
+                })
+            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1625","message":"Sample runs","data":{"runs":sample_runs},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        if not runs_data:
+            # #region agent log
+            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1595","message":"No runs found","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+            return jsonify({
+                'runs': [],
+                'settings_matrix': {},
+                'all_setting_names': []
+            })
+        
+        # Get all settings for all runs
+        runs_list = []
+        settings_matrix = {}
+        all_setting_names_set = set()
+        
+        for run in runs_data:
+            run_dict = {
+                'run_id': run['run_id'],
+                'run_filename': run['run_filename'],
+                'first_timestamp': run['first_timestamp'].isoformat() if run['first_timestamp'] else None,
+                'vehicle_id': run['vehicle_id'],
+                'settings_file_id': run['settings_file_id'],
+                'settings_filename': run['settings_filename']
+            }
+            runs_list.append(run_dict)
+            
+            # #region agent log
+            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1615","message":"Processing run","data":{"run_id":run['run_id'],"has_settings_file":bool(run['settings_file_id']),"vehicle_id":run['vehicle_id']},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+            
+            # Get settings for this run's settings file
+            if run['settings_file_id']:
+                settings_query = """
+                    SELECT setting_name, setting_value, category
+                    FROM vehicle_settings
+                    WHERE settings_file_id = %s
+                    ORDER BY category, setting_name
+                """
+                cursor.execute(settings_query, (run['settings_file_id'],))
+                settings = cursor.fetchall()
+                
+                # #region agent log
+                with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1628","message":"Settings loaded for run","data":{"run_id":run['run_id'],"settings_count":len(settings)},"timestamp":int(time.time()*1000)}) + '\n')
+                # #endregion
+                
+                for setting in settings:
+                    setting_name = setting['setting_name']
+                    all_setting_names_set.add(setting_name)
+                    
+                    if setting_name not in settings_matrix:
+                        settings_matrix[setting_name] = {}
+                    
+                    settings_matrix[setting_name][f"run_{run['run_id']}"] = setting['setting_value']
+        
+        # Sort setting names for consistent display
+        all_setting_names = sorted(list(all_setting_names_set))
+        
+        # Build complete matrix (fill missing values with null)
+        for setting_name in all_setting_names:
+            for run in runs_list:
+                run_key = f"run_{run['run_id']}"
+                if run_key not in settings_matrix[setting_name]:
+                    settings_matrix[setting_name][run_key] = None
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1645","message":"API response prepared","data":{"runs_count":len(runs_list),"settings_count":len(all_setting_names)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        return jsonify({
+            'runs': runs_list,
+            'settings_matrix': settings_matrix,
+            'all_setting_names': all_setting_names
+        })
         
     finally:
         cursor.close()

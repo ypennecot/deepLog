@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import json
+import time
 from decode_usbl import decode_usbl_message, convert_kogger_state_to_seaker
 
 load_dotenv()
@@ -390,9 +391,9 @@ def import_usbl_file(file_path, conn, file_progress=None):
         
         # Data types for USBL
         usbl_data_types = {
-            'USBL_Bearing': 'acoustic',
-            'USBL_Elevation': 'acoustic',
-            'USBL_Distance': 'acoustic',
+            'USBL_Bearing': 'acoustic',  # Azimuth en degrés
+            'USBL_Elevation': 'acoustic',  # Elevation en degrés
+            'USBL_Distance': 'acoustic',  # Distance en mètres
             'USBL_AUV_State': 'state',
             'USBL_SNR': 'acoustic',
             'USBL_Sequence': 'acoustic'  # For tracking message sequences
@@ -449,6 +450,11 @@ def import_usbl_file(file_path, conn, file_progress=None):
                         
                         # Extract data from decoded message
                         seq = decoded.get('sequence')
+                        azimuth_deg = decoded.get('azimuth_deg')
+                        elevation_deg = decoded.get('elevation_deg')
+                        distance_m = decoded.get('distance_m')
+                        auv_state = decoded.get('auv_state')
+                        snr = decoded.get('snr')
                         
                         # Store sequence number
                         if seq is not None:
@@ -461,9 +467,61 @@ def import_usbl_file(file_path, conn, file_progress=None):
                                 log_file_id
                             ))
                         
-                        # Note: azimuth, elevation, distance, state, snr are None for now
-                        # as the format needs more analysis. We store what we can extract.
-                        # These can be added later when the format is better understood.
+                        # Store azimuth (bearing) if available
+                        if azimuth_deg is not None:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USBL_Bearing'],
+                                float(azimuth_deg),
+                                log_file_id
+                            ))
+                        
+                        # Store elevation if available
+                        if elevation_deg is not None:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USBL_Elevation'],
+                                float(elevation_deg),
+                                log_file_id
+                            ))
+                        
+                        # Store distance if available
+                        if distance_m is not None and distance_m > 0:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USBL_Distance'],
+                                float(distance_m),
+                                log_file_id
+                            ))
+                        
+                        # Store AUV state if available (convert Kogger to Seaker)
+                        if auv_state is not None:
+                            seaker_state = convert_kogger_state_to_seaker(auv_state)
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USBL_AUV_State'],
+                                float(seaker_state),
+                                log_file_id
+                            ))
+                        
+                        # Store SNR if available
+                        if snr is not None:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USBL_SNR'],
+                                float(snr),
+                                log_file_id
+                            ))
                         
                         total_rows += 1
                     
@@ -499,7 +557,8 @@ def import_usbl_file(file_path, conn, file_progress=None):
                         continue
                     
                     decoded = decode_usbl_message(data_str, direction)
-                    if not decoded or decoded.get('message_type') != 'POSITION_RESPONSE':
+                    # Accepter POSITION_RESPONSE et STATUS_RESPONSE
+                    if not decoded or decoded.get('message_type') not in ['POSITION_RESPONSE', 'STATUS_RESPONSE']:
                         continue
                     
                     try:
@@ -514,7 +573,15 @@ def import_usbl_file(file_path, conn, file_progress=None):
                     if last_timestamp is None or timestamp > last_timestamp:
                         last_timestamp = timestamp
                     
+                    # Extract data from decoded message
                     seq = decoded.get('sequence')
+                    azimuth_deg = decoded.get('azimuth_deg')
+                    elevation_deg = decoded.get('elevation_deg')
+                    distance_m = decoded.get('distance_m')
+                    auv_state = decoded.get('auv_state')
+                    snr = decoded.get('snr')
+                    
+                    # Store sequence number
                     if seq is not None:
                         entries.append((
                             timestamp,
@@ -522,6 +589,62 @@ def import_usbl_file(file_path, conn, file_progress=None):
                             vehicle_id,
                             data_type_ids['USBL_Sequence'],
                             float(seq),
+                            log_file_id
+                        ))
+                    
+                    # Store azimuth (bearing) if available
+                    if azimuth_deg is not None:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USBL_Bearing'],
+                            float(azimuth_deg),
+                            log_file_id
+                        ))
+                    
+                    # Store elevation if available
+                    if elevation_deg is not None:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USBL_Elevation'],
+                            float(elevation_deg),
+                            log_file_id
+                        ))
+                    
+                    # Store distance if available
+                    if distance_m is not None and distance_m > 0:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USBL_Distance'],
+                            float(distance_m),
+                            log_file_id
+                        ))
+                    
+                    # Store AUV state if available (convert Kogger to Seaker)
+                    if auv_state is not None:
+                        seaker_state = convert_kogger_state_to_seaker(auv_state)
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USBL_AUV_State'],
+                            float(seaker_state),
+                            log_file_id
+                        ))
+                    
+                    # Store SNR if available
+                    if snr is not None:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USBL_SNR'],
+                            float(snr),
                             log_file_id
                         ))
                     
@@ -560,6 +683,462 @@ def import_usbl_file(file_path, conn, file_progress=None):
             """, (str(e), log_file_id))
             conn.commit()
         print(f"❌ Error importing USBL file {filename}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        cursor.close()
+
+def convert_state_string_to_numeric(state_str):
+    """Convert state/mode strings to numeric codes for storage."""
+    state_map = {
+        # RTK Status
+        '3D_FIX': 1,
+        'NO_FIX': 0,
+        '2D_FIX': 2,
+        # Arm Status
+        'ARM': 1,
+        'DISARM': 0,
+        # Motion Status
+        'LOITER': 1,
+        'MANUAL': 2,
+        'AUTO': 3,
+        'GUIDED': 4,
+        # AUV States / Orders
+        'ALT_HOLD_FOLLOW': 14,
+        'DEPTH_HOLD_FOLLOW': 13,
+        'ALT_HOLD': 11,
+        'DEPTH_HOLD': 7,
+        'STANDBY': 25,
+        'SURFACE': 19,
+        'EMERGENCY': 1,
+        "PAS D'ORDRE": 0,
+        'PAS_D_ORDRE': 0,
+    }
+    return state_map.get(state_str.upper(), 0)
+
+def import_usv_full_file(file_path, conn, file_progress=None):
+    """Import a USV full log file containing USBL AUV tracking data.
+    
+    Args:
+        file_path: Path to the USV full log file
+        conn: Database connection
+        file_progress: Optional dict to track file import progress
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    filename = os.path.basename(file_path)
+    vehicle_type, vehicle_id = extract_vehicle_info(filename)
+    
+    if not vehicle_type:
+        print(f"⚠️  Could not determine vehicle type from {filename}, skipping")
+        return False
+    
+    # USV full files are from USV
+    if vehicle_type != 'USV':
+        print(f"⚠️  USV full file {filename} is not from USV, skipping")
+        return False
+    
+    cursor = conn.cursor()
+    log_file_id = None
+    
+    try:
+        # Check if file already exists
+        cursor.execute("""
+            SELECT id FROM log_files 
+            WHERE filename = %s AND vehicle_type = %s AND vehicle_id = %s
+            LIMIT 1
+        """, (filename, vehicle_type, vehicle_id))
+        existing = cursor.fetchone()
+        if existing:
+            print(f"⚠️  File {filename} already imported, skipping")
+            return False
+        
+        # Create log_file entry
+        file_size = os.path.getsize(file_path)
+        
+        if file_progress is not None:
+            file_progress['bytes_total'] = file_size
+            file_progress['bytes_processed'] = 0
+        
+        cursor.execute("""
+            INSERT INTO log_files (filename, file_path, vehicle_type, vehicle_id, file_size_bytes, import_status, import_started_at)
+            VALUES (%s, %s, %s, %s, %s, 'importing', NOW())
+            RETURNING id
+        """, (filename, str(file_path), vehicle_type, vehicle_id, file_size))
+        log_file_id = cursor.fetchone()[0]
+        conn.commit()
+        
+        print(f"📄 Importing USV full file {filename} ({vehicle_type} {vehicle_id})...")
+        
+        # Data types for USV full log
+        usv_full_data_types = {
+            'USV_FULL_AUV_Distance': 'acoustic',
+            'USV_FULL_AUV_Bearing': 'acoustic',
+            'USV_FULL_AUV_Elevation': 'acoustic',
+            'USV_FULL_AUV_State': 'state',
+            'USV_FULL_USV_RTK_Status': 'GPS',
+            'USV_FULL_USV_Arm_Status': 'State',
+            'USV_FULL_USV_Motion_Status': 'State',
+            'USV_FULL_USV_Order': 'State',
+            'USV_FULL_Unknown': 'acoustic'
+        }
+        
+        # Get or create data types
+        data_type_ids = {}
+        for data_type_name, category in usv_full_data_types.items():
+            data_type_ids[data_type_name] = get_or_create_data_type(cursor, data_type_name, vehicle_type)
+        
+        first_timestamp = None
+        last_timestamp = None
+        total_rows = 0
+        entries = []
+        
+        # Regex pattern to match lines with AUV information
+        # Pattern: timestamp | status | location - USV:... | AUV#N:...
+        # Note: The data may be split across two lines (timestamp on first, data on second with tabs)
+        pattern = re.compile(
+            r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+\|\s+\w+\s+\|\s+.*?-\s+'
+            r'(?:.*?\n)?\s*USV:([^|]+)\s+\|\s+AUV#(\d+):([^,]+),\s+([\d.]+)m,\s+([\d.]+)°/([\d.-]+)°:([\d.]+)',
+            re.MULTILINE | re.DOTALL
+        )
+        
+        # Read file in chunks and process
+        chunk_size = 50000
+        bytes_processed = 0
+        
+        # Read entire file content to handle multi-line matches
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            file_content = f.read()
+            bytes_processed = len(file_content.encode('utf-8'))
+        
+        # Process all matches
+        matches = pattern.finditer(file_content)
+        
+        # #region agent log
+        import json
+        match_count = 0
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:816","message":"Starting pattern matching","data":{"filename":filename},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Process matches in chunks
+        chunk = []
+        for match in matches:
+            match_count += 1
+            chunk.append(match)
+            
+            if len(chunk) >= chunk_size:
+                # Process chunk
+                for match in chunk:
+                    try:
+                        # Extract timestamp
+                        timestamp_str = match.group(1)
+                        timestamp = pd.to_datetime(timestamp_str, errors='coerce')
+                        if pd.isna(timestamp) or timestamp.year < 2000 or timestamp.year > 2100:
+                            continue
+                        
+                        # Extract USV data: RTK status, Arm status, Motion status, Order
+                        usv_data = match.group(2).strip()
+                        usv_parts = [p.strip() for p in usv_data.split(',')]
+                        rtk_status = usv_parts[0] if len(usv_parts) > 0 else ''
+                        arm_status = usv_parts[1] if len(usv_parts) > 1 else ''
+                        motion_status = usv_parts[2] if len(usv_parts) > 2 else ''
+                        usv_order = usv_parts[3] if len(usv_parts) > 3 else ''
+                        
+                        # Extract AUV data
+                        auv_id = int(match.group(3))
+                        auv_state = match.group(4).strip()
+                        distance = float(match.group(5))
+                        bearing = float(match.group(6))
+                        elevation = float(match.group(7))
+                        unknown_value = float(match.group(8))
+                        
+                        # Update timestamp range
+                        if first_timestamp is None or timestamp < first_timestamp:
+                            first_timestamp = timestamp
+                        if last_timestamp is None or timestamp > last_timestamp:
+                            last_timestamp = timestamp
+                        
+                        # Store USV data
+                        if rtk_status:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USV_FULL_USV_RTK_Status'],
+                                float(convert_state_string_to_numeric(rtk_status)),
+                                log_file_id
+                            ))
+                        
+                        if arm_status:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USV_FULL_USV_Arm_Status'],
+                                float(convert_state_string_to_numeric(arm_status)),
+                                log_file_id
+                            ))
+                        
+                        if motion_status:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USV_FULL_USV_Motion_Status'],
+                                float(convert_state_string_to_numeric(motion_status)),
+                                log_file_id
+                            ))
+                        
+                        if usv_order:
+                            entries.append((
+                                timestamp,
+                                vehicle_type,
+                                vehicle_id,
+                                data_type_ids['USV_FULL_USV_Order'],
+                                float(convert_state_string_to_numeric(usv_order)),
+                                log_file_id
+                            ))
+                        
+                        # Store AUV data (with AUV ID in vehicle_id field)
+                        auv_vehicle_id = f"AUV{auv_id}"
+                        
+                        entries.append((
+                            timestamp,
+                            'AUV',  # vehicle_type for AUV data
+                            auv_vehicle_id,
+                            data_type_ids['USV_FULL_AUV_Distance'],
+                            distance,
+                            log_file_id
+                        ))
+                        
+                        entries.append((
+                            timestamp,
+                            'AUV',
+                            auv_vehicle_id,
+                            data_type_ids['USV_FULL_AUV_Bearing'],
+                            bearing,
+                            log_file_id
+                        ))
+                        
+                        entries.append((
+                            timestamp,
+                            'AUV',
+                            auv_vehicle_id,
+                            data_type_ids['USV_FULL_AUV_Elevation'],
+                            elevation,
+                            log_file_id
+                        ))
+                        
+                        entries.append((
+                            timestamp,
+                            'AUV',
+                            auv_vehicle_id,
+                            data_type_ids['USV_FULL_AUV_State'],
+                            float(convert_state_string_to_numeric(auv_state)),
+                            log_file_id
+                        ))
+                        
+                        entries.append((
+                            timestamp,
+                            'AUV',
+                            auv_vehicle_id,
+                            data_type_ids['USV_FULL_Unknown'],
+                            unknown_value,
+                            log_file_id
+                        ))
+                        
+                        total_rows += 1
+                        
+                    except (ValueError, IndexError) as e:
+                        # Skip malformed lines
+                        # #region agent log
+                        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                            f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:946","message":"Error parsing match","data":{"error":str(e)},"timestamp":int(time.time()*1000)}) + '\n')
+                        # #endregion
+                        continue
+                
+                # Bulk insert entries
+                if entries:
+                    # #region agent log
+                    with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:950","message":"Bulk inserting entries","data":{"entry_count":len(entries),"total_rows":total_rows},"timestamp":int(time.time()*1000)}) + '\n')
+                    # #endregion
+                    execute_values(cursor, """
+                        INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
+                        VALUES %s
+                    """, entries, page_size=1000)
+                    conn.commit()
+                    
+                    # Update progress
+                    if file_progress is not None:
+                        progress_ratio = min(bytes_processed / file_size, 1.0)
+                        file_progress['bytes_processed'] = bytes_processed
+                    
+                    entries = []
+                
+                chunk = []
+        
+        # Process remaining chunk
+        if chunk:
+            for match in chunk:
+                try:
+                    timestamp_str = match.group(1)
+                    timestamp = pd.to_datetime(timestamp_str, errors='coerce')
+                    if pd.isna(timestamp) or timestamp.year < 2000 or timestamp.year > 2100:
+                        continue
+                    
+                    usv_data = match.group(2).strip()
+                    usv_parts = [p.strip() for p in usv_data.split(',')]
+                    rtk_status = usv_parts[0] if len(usv_parts) > 0 else ''
+                    arm_status = usv_parts[1] if len(usv_parts) > 1 else ''
+                    motion_status = usv_parts[2] if len(usv_parts) > 2 else ''
+                    usv_order = usv_parts[3] if len(usv_parts) > 3 else ''
+                    
+                    auv_id = int(match.group(3))
+                    auv_state = match.group(4).strip()
+                    distance = float(match.group(5))
+                    bearing = float(match.group(6))
+                    elevation = float(match.group(7))
+                    unknown_value = float(match.group(8))
+                    
+                    if first_timestamp is None or timestamp < first_timestamp:
+                        first_timestamp = timestamp
+                    if last_timestamp is None or timestamp > last_timestamp:
+                        last_timestamp = timestamp
+                    
+                    if rtk_status:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USV_FULL_USV_RTK_Status'],
+                            float(convert_state_string_to_numeric(rtk_status)),
+                            log_file_id
+                        ))
+                    
+                    if arm_status:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USV_FULL_USV_Arm_Status'],
+                            float(convert_state_string_to_numeric(arm_status)),
+                            log_file_id
+                        ))
+                    
+                    if motion_status:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USV_FULL_USV_Motion_Status'],
+                            float(convert_state_string_to_numeric(motion_status)),
+                            log_file_id
+                        ))
+                    
+                    if usv_order:
+                        entries.append((
+                            timestamp,
+                            vehicle_type,
+                            vehicle_id,
+                            data_type_ids['USV_FULL_USV_Order'],
+                            float(convert_state_string_to_numeric(usv_order)),
+                            log_file_id
+                        ))
+                    
+                    auv_vehicle_id = f"AUV{auv_id}"
+                    
+                    entries.append((
+                        timestamp,
+                        'AUV',
+                        auv_vehicle_id,
+                        data_type_ids['USV_FULL_AUV_Distance'],
+                        distance,
+                        log_file_id
+                    ))
+                    
+                    entries.append((
+                        timestamp,
+                        'AUV',
+                        auv_vehicle_id,
+                        data_type_ids['USV_FULL_AUV_Bearing'],
+                        bearing,
+                        log_file_id
+                    ))
+                    
+                    entries.append((
+                        timestamp,
+                        'AUV',
+                        auv_vehicle_id,
+                        data_type_ids['USV_FULL_AUV_Elevation'],
+                        elevation,
+                        log_file_id
+                    ))
+                    
+                    entries.append((
+                        timestamp,
+                        'AUV',
+                        auv_vehicle_id,
+                        data_type_ids['USV_FULL_AUV_State'],
+                        float(convert_state_string_to_numeric(auv_state)),
+                        log_file_id
+                    ))
+                    
+                    entries.append((
+                        timestamp,
+                        'AUV',
+                        auv_vehicle_id,
+                        data_type_ids['USV_FULL_Unknown'],
+                        unknown_value,
+                        log_file_id
+                    ))
+                    
+                    total_rows += 1
+                    
+                except (ValueError, IndexError) as e:
+                    continue
+        
+        # Final bulk insert
+        if entries:
+            execute_values(cursor, """
+                INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
+                VALUES %s
+            """, entries, page_size=1000)
+            conn.commit()
+        
+        # Update log_file with completion status
+        cursor.execute("""
+            UPDATE log_files
+            SET import_status = 'completed',
+                import_completed_at = NOW(),
+                row_count = %s,
+                first_timestamp = %s,
+                last_timestamp = %s
+            WHERE id = %s
+        """, (total_rows, first_timestamp, last_timestamp, log_file_id))
+        conn.commit()
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:1095","message":"Import completed","data":{"total_rows":total_rows,"match_count":match_count,"first_timestamp":str(first_timestamp) if first_timestamp else None,"last_timestamp":str(last_timestamp) if last_timestamp else None},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        print(f"✅ Imported {total_rows:,} USV full entries from {filename}")
+        return True
+        
+    except Exception as e:
+        conn.rollback()
+        if log_file_id:
+            cursor.execute("""
+                UPDATE log_files
+                SET import_status = 'failed', error_message = %s
+                WHERE id = %s
+            """, (str(e), log_file_id))
+            conn.commit()
+        print(f"❌ Error importing USV full file {filename}: {e}")
         import traceback
         traceback.print_exc()
         return False
