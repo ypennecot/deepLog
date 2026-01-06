@@ -256,8 +256,11 @@ def import_navigation_file(file_path, conn, file_progress=None):
                     
                     # Validate timestamp is within reasonable range
                     # Check if timestamp is in the future beyond reasonable bounds (e.g., year > 2100)
-                    # or in the past before reasonable bounds (e.g., year < 2000)
-                    if timestamp.year < 2000 or timestamp.year > 2100:
+                    # or in the past before reasonable bounds
+                    # For recent data (2020+), reject timestamps with year < 2020 (likely parsing errors)
+                    current_year = datetime.now().year
+                    min_year = max(2000, current_year - 5)  # Allow data from last 5 years minimum
+                    if timestamp.year < min_year or timestamp.year > 2100:
                         # Skip obviously invalid timestamps
                         continue
                     
