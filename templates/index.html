@@ -26,6 +26,25 @@
             padding: 30px;
         }
         
+        .nav-links {
+            margin-bottom: 20px;
+        }
+        
+        .nav-link {
+            display: inline-block;
+            margin-right: 20px;
+            color: #007bff;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .nav-link:hover {
+            background: #f8f9fa;
+            text-decoration: none;
+        }
+        
         h1 {
             color: #333;
             margin-bottom: 10px;
@@ -409,10 +428,46 @@
         .multi-select input[type="checkbox"] {
             margin-right: 8px;
         }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .status-badge.status-pending {
+            background: #ffc107;
+            color: #000;
+        }
+        
+        .status-badge.status-processing {
+            background: #17a2b8;
+            color: #fff;
+        }
+        
+        .status-badge.status-completed {
+            background: #28a745;
+            color: #fff;
+        }
+        
+        .status-badge.status-failed {
+            background: #dc3545;
+            color: #fff;
+        }
+        
+        .offset-input {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <div class="nav-links">
+            <a href="/settings" class="nav-link">⚙️ Settings Logs</a>
+        </div>
         <h1>DeepLog - Visualisation des données</h1>
         <p class="subtitle">Analyse des logs de navigation USV et AUV</p>
         
@@ -427,12 +482,17 @@
         </div>
         
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('rows')">Vue en lignes</button>
-            <button class="tab" onclick="switchTab('columns')">Vue en colonnes</button>
+            <button class="tab active" onclick="switchTab('log_files')">Fichiers de log</button>
+            <button class="tab" onclick="switchTab('data_type_catalog')">Catalogue types</button>
+            <button class="tab" onclick="switchTab('log_entries')">Entrées de log</button>
+            <button class="tab" onclick="switchTab('settings_files')">Fichiers paramètres</button>
+            <button class="tab" onclick="switchTab('vehicle_settings')">Paramètres véhicules</button>
+            <button class="tab" onclick="switchTab('usbl_decoded')">Logs USBL décodés</button>
             <button class="tab" onclick="switchTab('runs')">Runs AUV</button>
+            <button class="tab" onclick="switchTab('videos')">Vidéos</button>
         </div>
         
-        <!-- Stats only shown in rows and columns views -->
+        <!-- Stats -->
         <div class="stats" id="stats" style="display: block;">
             <div class="stat-card">
                 <div class="stat-label">Total d'entrées</div>
@@ -452,99 +512,247 @@
             </div>
         </div>
         
-        <!-- Vue en lignes (vue originale) -->
-        <div id="rows-view" class="tab-content active">
+        <!-- Vue Fichiers de log -->
+        <div id="log_files-view" class="tab-content active">
             <div class="filters">
                 <div class="filter-group">
-                    <label for="vehicle-filter">Type de véhicule</label>
-                    <select id="vehicle-filter">
+                    <label for="log_files-vehicle-filter">Type de véhicule</label>
+                    <select id="log_files-vehicle-filter">
                         <option value="">Tous</option>
                     </select>
                 </div>
                 <div class="filter-group">
-                    <label for="data-type-filter">Type de donnée</label>
-                    <select id="data-type-filter">
+                    <label for="log_files-status-filter">Statut import</label>
+                    <select id="log_files-status-filter">
                         <option value="">Tous</option>
+                        <option value="pending">En attente</option>
+                        <option value="importing">Import en cours</option>
+                        <option value="completed">Terminé</option>
+                        <option value="failed">Échoué</option>
                     </select>
-                </div>
-                <div class="filter-group">
-                    <label for="start-time-filter">Date début</label>
-                    <input type="datetime-local" id="start-time-filter">
-                </div>
-                <div class="filter-group">
-                    <label for="end-time-filter">Date fin</label>
-                    <input type="datetime-local" id="end-time-filter">
                 </div>
             </div>
             
             <div class="table-container">
-                <div id="loading" class="loading">Chargement des données...</div>
-                <div id="error" class="error" style="display: none;"></div>
-                <table id="data-table" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>Date/Heure</th>
-                            <th>Véhicule</th>
-                            <th>ID Véhicule</th>
-                            <th>Type de donnée</th>
-                            <th>Valeur</th>
-                            <th>Fichier source</th>
-                        </tr>
+                <div id="log_files-loading" class="loading">Chargement des données...</div>
+                <div id="log_files-error" class="error" style="display: none;"></div>
+                <table id="log_files-table" style="display: none;">
+                    <thead id="log_files-thead">
                     </thead>
-                    <tbody id="table-body">
+                    <tbody id="log_files-tbody">
                     </tbody>
                 </table>
             </div>
             
-            <div class="pagination" id="pagination" style="display: none;">
-                <button id="prev-page" disabled>Précédent</button>
-                <span class="page-info" id="page-info"></span>
-                <button id="next-page">Suivant</button>
+            <div class="pagination" id="log_files-pagination" style="display: none;">
+                <button id="log_files-prev-page" disabled>Précédent</button>
+                <span class="page-info" id="log_files-page-info"></span>
+                <button id="log_files-next-page">Suivant</button>
             </div>
         </div>
         
-        <!-- Vue en colonnes (vue pivotée) -->
-        <div id="columns-view" class="tab-content">
+        <!-- Vue Catalogue types -->
+        <div id="data_type_catalog-view" class="tab-content">
             <div class="filters">
                 <div class="filter-group">
-                    <label for="vehicle-filter-col">Type de véhicule</label>
-                    <select id="vehicle-filter-col">
+                    <label for="data_type_catalog-vehicle-filter">Type de véhicule</label>
+                    <select id="data_type_catalog-vehicle-filter">
                         <option value="">Tous</option>
                     </select>
                 </div>
-                <div class="filter-group" style="grid-column: span 2;">
-                    <label>Types de données à afficher (sélection multiple)</label>
-                    <div class="multi-select" id="data-types-multi-select">
-                        <div style="text-align: center; padding: 20px; color: #666;">
-                            Chargement des types de données...
-                        </div>
-                    </div>
-                </div>
                 <div class="filter-group">
-                    <label for="start-time-filter-col">Date début</label>
-                    <input type="datetime-local" id="start-time-filter-col">
-                </div>
-                <div class="filter-group">
-                    <label for="end-time-filter-col">Date fin</label>
-                    <input type="datetime-local" id="end-time-filter-col">
+                    <label for="data_type_catalog-category-filter">Catégorie</label>
+                    <input type="text" id="data_type_catalog-category-filter" placeholder="Filtrer par catégorie">
                 </div>
             </div>
             
             <div class="table-container">
-                <div id="loading-col" class="loading">Chargement des types de données...</div>
-                <div id="error-col" class="error" style="display: none;"></div>
-                <table id="data-table-col" style="display: none;">
-                    <thead id="table-head-col">
+                <div id="data_type_catalog-loading" class="loading">Chargement des données...</div>
+                <div id="data_type_catalog-error" class="error" style="display: none;"></div>
+                <table id="data_type_catalog-table" style="display: none;">
+                    <thead id="data_type_catalog-thead">
                     </thead>
-                    <tbody id="table-body-col">
+                    <tbody id="data_type_catalog-tbody">
                     </tbody>
                 </table>
             </div>
             
-            <div class="pagination" id="pagination-col" style="display: none;">
-                <button id="prev-page-col" disabled>Précédent</button>
-                <span class="page-info" id="page-info-col"></span>
-                <button id="next-page-col">Suivant</button>
+            <div class="pagination" id="data_type_catalog-pagination" style="display: none;">
+                <button id="data_type_catalog-prev-page" disabled>Précédent</button>
+                <span class="page-info" id="data_type_catalog-page-info"></span>
+                <button id="data_type_catalog-next-page">Suivant</button>
+            </div>
+        </div>
+        
+        <!-- Vue Entrées de log -->
+        <div id="log_entries-view" class="tab-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="log_entries-vehicle-filter">Type de véhicule</label>
+                    <select id="log_entries-vehicle-filter">
+                        <option value="">Tous</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="log_entries-data-type-filter">Type de donnée</label>
+                    <select id="log_entries-data-type-filter">
+                        <option value="">Tous</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="log_entries-start-time-filter">Date début</label>
+                    <input type="datetime-local" id="log_entries-start-time-filter">
+                </div>
+                <div class="filter-group">
+                    <label for="log_entries-end-time-filter">Date fin</label>
+                    <input type="datetime-local" id="log_entries-end-time-filter">
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div id="log_entries-loading" class="loading">Chargement des données...</div>
+                <div id="log_entries-error" class="error" style="display: none;"></div>
+                <table id="log_entries-table" style="display: none;">
+                    <thead id="log_entries-thead">
+                    </thead>
+                    <tbody id="log_entries-tbody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="log_entries-pagination" style="display: none;">
+                <button id="log_entries-prev-page" disabled>Précédent</button>
+                <span class="page-info" id="log_entries-page-info"></span>
+                <button id="log_entries-next-page">Suivant</button>
+            </div>
+        </div>
+        
+        <!-- Vue Fichiers paramètres -->
+        <div id="settings_files-view" class="tab-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="settings_files-vehicle-filter">Type de véhicule</label>
+                    <select id="settings_files-vehicle-filter">
+                        <option value="">Tous</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="settings_files-status-filter">Statut import</label>
+                    <select id="settings_files-status-filter">
+                        <option value="">Tous</option>
+                        <option value="pending">En attente</option>
+                        <option value="importing">Import en cours</option>
+                        <option value="completed">Terminé</option>
+                        <option value="failed">Échoué</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div id="settings_files-loading" class="loading">Chargement des données...</div>
+                <div id="settings_files-error" class="error" style="display: none;"></div>
+                <table id="settings_files-table" style="display: none;">
+                    <thead id="settings_files-thead">
+                    </thead>
+                    <tbody id="settings_files-tbody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="settings_files-pagination" style="display: none;">
+                <button id="settings_files-prev-page" disabled>Précédent</button>
+                <span class="page-info" id="settings_files-page-info"></span>
+                <button id="settings_files-next-page">Suivant</button>
+            </div>
+        </div>
+        
+        <!-- Vue Paramètres véhicules -->
+        <div id="vehicle_settings-view" class="tab-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="vehicle_settings-file-id-filter">ID Fichier paramètres</label>
+                    <input type="number" id="vehicle_settings-file-id-filter" placeholder="Filtrer par ID fichier">
+                </div>
+                <div class="filter-group">
+                    <label for="vehicle_settings-category-filter">Catégorie</label>
+                    <input type="text" id="vehicle_settings-category-filter" placeholder="Filtrer par catégorie">
+                </div>
+                <div class="filter-group">
+                    <label for="vehicle_settings-name-filter">Nom du paramètre</label>
+                    <input type="text" id="vehicle_settings-name-filter" placeholder="Filtrer par nom">
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div id="vehicle_settings-loading" class="loading">Chargement des données...</div>
+                <div id="vehicle_settings-error" class="error" style="display: none;"></div>
+                <table id="vehicle_settings-table" style="display: none;">
+                    <thead id="vehicle_settings-thead">
+                    </thead>
+                    <tbody id="vehicle_settings-tbody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="vehicle_settings-pagination" style="display: none;">
+                <button id="vehicle_settings-prev-page" disabled>Précédent</button>
+                <span class="page-info" id="vehicle_settings-page-info"></span>
+                <button id="vehicle_settings-next-page">Suivant</button>
+            </div>
+        </div>
+        
+        <!-- Vue Logs USBL décodés -->
+        <div id="usbl_decoded-view" class="tab-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="usbl_decoded-log-file-filter">Fichier USBL</label>
+                    <select id="usbl_decoded-log-file-filter">
+                        <option value="">Tous</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>&nbsp;</label>
+                    <button id="usbl_decoded-decode-btn" class="btn btn-success" style="width: 100%;">
+                        <span>🔄</span> Décoder le fichier sélectionné
+                    </button>
+                </div>
+                <div class="filter-group">
+                    <label for="usbl_decoded-direction-filter">Direction</label>
+                    <select id="usbl_decoded-direction-filter">
+                        <option value="">Toutes</option>
+                        <option value="SENT">SENT</option>
+                        <option value="RECEIVED">RECEIVED</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="usbl_decoded-message-name-filter">Nom du message</label>
+                    <input type="text" id="usbl_decoded-message-name-filter" placeholder="Filtrer par nom">
+                </div>
+                <div class="filter-group">
+                    <label for="usbl_decoded-start-time-filter">Date début</label>
+                    <input type="datetime-local" id="usbl_decoded-start-time-filter">
+                </div>
+                <div class="filter-group">
+                    <label for="usbl_decoded-end-time-filter">Date fin</label>
+                    <input type="datetime-local" id="usbl_decoded-end-time-filter">
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div id="usbl_decoded-loading" class="loading">Chargement des données...</div>
+                <div id="usbl_decoded-error" class="error" style="display: none;"></div>
+                <table id="usbl_decoded-table" style="display: none;">
+                    <thead id="usbl_decoded-thead">
+                    </thead>
+                    <tbody id="usbl_decoded-tbody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination" id="usbl_decoded-pagination" style="display: none;">
+                <button id="usbl_decoded-prev-page" disabled>Précédent</button>
+                <span class="page-info" id="usbl_decoded-page-info"></span>
+                <button id="usbl_decoded-next-page">Suivant</button>
             </div>
         </div>
         
@@ -582,35 +790,523 @@
             
             <div class="runs-legend" id="runs-legend"></div>
         </div>
+        
+        <!-- Vue Vidéos -->
+        <div id="videos-view" class="tab-content">
+            <div style="margin-bottom: 20px;">
+                <h2 style="margin-bottom: 15px;">Gestion des vidéos</h2>
+                <div style="margin-bottom: 20px;">
+                    <input type="file" id="video-file-input" multiple accept="video/*" style="display: none;">
+                    <button class="btn btn-success" onclick="document.getElementById('video-file-input').click()">
+                        <span>📹</span> Importer des vidéos
+                    </button>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <div id="videos-loading" class="loading">Chargement des vidéos...</div>
+                <div id="videos-error" class="error" style="display: none;"></div>
+                <table id="videos-table" style="display: none; width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Nom du fichier</th>
+                            <th>Heure de début</th>
+                            <th>Offset (secondes)</th>
+                            <th>Heure effective</th>
+                            <th>Durée</th>
+                            <th>Caméra ID</th>
+                            <th>Statut thumbnails</th>
+                            <th>Run associé</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="videos-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
     
     <script>
-        let currentPage = 1;
-        let currentPageCol = 1;
         const perPage = 100;
-        let totalPages = 1;
-        let totalPagesCol = 1;
-        let selectedDataTypes = [];
+        const tablePages = {};
+        const tableTotals = {};
         
         // Tab switching
         function switchTab(tabName) {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
-            if (tabName === 'rows') {
-                document.querySelectorAll('.tab')[0].classList.add('active');
-                document.getElementById('rows-view').classList.add('active');
+            const tableNames = ['log_files', 'data_type_catalog', 'log_entries', 'settings_files', 'vehicle_settings', 'usbl_decoded', 'videos'];
+            
+            if (tableNames.includes(tabName)) {
+                const tabIndex = tableNames.indexOf(tabName);
+                document.querySelectorAll('.tab')[tabIndex].classList.add('active');
+                document.getElementById(`${tabName}-view`).classList.add('active');
                 document.getElementById('stats').style.display = 'grid';
-            } else if (tabName === 'columns') {
-                document.querySelectorAll('.tab')[1].classList.add('active');
-                document.getElementById('columns-view').classList.add('active');
-                document.getElementById('stats').style.display = 'grid';
-                loadDataTypesForMultiSelect();
+                if (tabName === 'videos') {
+                    loadVideos();
+                } else if (tabName === 'usbl_decoded') {
+                    loadUsblDecodedMessages();
+                } else {
+                    if (!tablePages[tabName]) {
+                        tablePages[tabName] = 1;
+                    }
+                    loadTableData(tabName);
+                }
             } else if (tabName === 'runs') {
-                document.querySelectorAll('.tab')[2].classList.add('active');
+                document.querySelectorAll('.tab')[6].classList.add('active');
                 document.getElementById('runs-view').classList.add('active');
                 document.getElementById('stats').style.display = 'none';
                 loadRuns();
+            }
+        }
+        
+        // Format timestamp with milliseconds
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            let ms = '000';
+            if (timestamp.includes('.')) {
+                const fractionalMatch = timestamp.match(/\.(\d+)/);
+                if (fractionalMatch) {
+                    const fractional = fractionalMatch[1];
+                    ms = fractional.substring(0, 3).padEnd(3, '0');
+                }
+            } else {
+                ms = date.getMilliseconds().toString().padStart(3, '0');
+            }
+            const dateStr = date.toLocaleString('fr-FR', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            return `${dateStr}.${ms}`;
+        }
+        
+        // Format value based on type
+        function formatValue(value) {
+            if (value === null || value === undefined) return '-';
+            if (typeof value === 'number') {
+                return parseFloat(value).toLocaleString('fr-FR', {maximumFractionDigits: 6});
+            }
+            return String(value);
+        }
+        
+        // Generic function to load table data
+        async function loadTableData(tableName) {
+            const loading = document.getElementById(`${tableName}-loading`);
+            const error = document.getElementById(`${tableName}-error`);
+            const table = document.getElementById(`${tableName}-table`);
+            const thead = document.getElementById(`${tableName}-thead`);
+            const tbody = document.getElementById(`${tableName}-tbody`);
+            
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            table.style.display = 'none';
+            
+            try {
+                const params = new URLSearchParams({
+                    page: tablePages[tableName] || 1,
+                    per_page: perPage
+                });
+                
+                // Add filters based on table name
+                if (tableName === 'log_files') {
+                    const vehicleType = document.getElementById('log_files-vehicle-filter').value;
+                    const status = document.getElementById('log_files-status-filter').value;
+                    if (vehicleType) params.append('vehicle_type', vehicleType);
+                    if (status) params.append('import_status', status);
+                } else if (tableName === 'data_type_catalog') {
+                    const vehicleType = document.getElementById('data_type_catalog-vehicle-filter').value;
+                    const category = document.getElementById('data_type_catalog-category-filter').value;
+                    if (vehicleType) params.append('vehicle_type', vehicleType);
+                    if (category) params.append('category', category);
+                } else if (tableName === 'log_entries') {
+                    const vehicleType = document.getElementById('log_entries-vehicle-filter').value;
+                    const dataType = document.getElementById('log_entries-data-type-filter').value;
+                    const startTime = document.getElementById('log_entries-start-time-filter').value;
+                    const endTime = document.getElementById('log_entries-end-time-filter').value;
+                    if (vehicleType) params.append('vehicle_type', vehicleType);
+                    if (dataType) params.append('data_type', dataType);
+                    if (startTime) params.append('start_time', startTime);
+                    if (endTime) params.append('end_time', endTime);
+                } else if (tableName === 'settings_files') {
+                    const vehicleType = document.getElementById('settings_files-vehicle-filter').value;
+                    const status = document.getElementById('settings_files-status-filter').value;
+                    if (vehicleType) params.append('vehicle_type', vehicleType);
+                    if (status) params.append('import_status', status);
+                } else if (tableName === 'vehicle_settings') {
+                    const fileId = document.getElementById('vehicle_settings-file-id-filter').value;
+                    const category = document.getElementById('vehicle_settings-category-filter').value;
+                    const name = document.getElementById('vehicle_settings-name-filter').value;
+                    if (fileId) params.append('settings_file_id', fileId);
+                    if (category) params.append('category', category);
+                    if (name) params.append('setting_name', name);
+                }
+                
+                const response = await fetch(`/api/tables/${tableName}?${params}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                tableTotals[tableName] = data.total;
+                tablePages[tableName] = data.page;
+                
+                // Build table header dynamically
+                if (data.entries.length > 0) {
+                    const headerRow = document.createElement('tr');
+                    Object.keys(data.entries[0]).forEach(key => {
+                        const th = document.createElement('th');
+                        th.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        headerRow.appendChild(th);
+                    });
+                    thead.innerHTML = '';
+                    thead.appendChild(headerRow);
+                    
+                    // Build table body
+                    tbody.innerHTML = '';
+                    data.entries.forEach(entry => {
+                        const row = document.createElement('tr');
+                        Object.keys(data.entries[0]).forEach(key => {
+                            const cell = document.createElement('td');
+                            let value = entry[key];
+                            
+                            // Format timestamps
+                            if (key.includes('time') || key.includes('timestamp') || key.includes('_at')) {
+                                cell.textContent = formatTimestamp(value);
+                            }
+                            // Format vehicle type badges
+                            else if (key === 'vehicle_type' && value) {
+                                const badge = document.createElement('span');
+                                badge.className = `vehicle-badge ${value === 'USV' ? 'vehicle-usv' : 'vehicle-auv'}`;
+                                badge.textContent = value;
+                                cell.appendChild(badge);
+                            }
+                            // Format other values
+                            else {
+                                cell.textContent = formatValue(value);
+                            }
+                            row.appendChild(cell);
+                        });
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    thead.innerHTML = '';
+                    tbody.innerHTML = '<tr><td colspan="100%" style="text-align: center; padding: 20px;">Aucune donnée disponible</td></tr>';
+                }
+                
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                document.getElementById(`${tableName}-pagination`).style.display = 'flex';
+                updateTablePagination(tableName);
+                
+            } catch (err) {
+                loading.style.display = 'none';
+                error.style.display = 'block';
+                error.textContent = `Erreur: ${err.message}`;
+            }
+        }
+        
+        function updateTablePagination(tableName) {
+            const currentPage = tablePages[tableName] || 1;
+            const totalPages = Math.ceil((tableTotals[tableName] || 0) / perPage);
+            document.getElementById(`${tableName}-page-info`).textContent = 
+                `Page ${currentPage} sur ${totalPages}`;
+            document.getElementById(`${tableName}-prev-page`).disabled = currentPage === 1;
+            document.getElementById(`${tableName}-next-page`).disabled = currentPage >= totalPages;
+        }
+        
+        // Setup event listeners for each table
+        const tableNames = ['log_files', 'data_type_catalog', 'log_entries', 'settings_files', 'vehicle_settings'];
+        tableNames.forEach(tableName => {
+            // Pagination
+            document.getElementById(`${tableName}-prev-page`).addEventListener('click', () => {
+                if (tablePages[tableName] > 1) {
+                    tablePages[tableName]--;
+                    loadTableData(tableName);
+                }
+            });
+            
+            document.getElementById(`${tableName}-next-page`).addEventListener('click', () => {
+                const totalPages = Math.ceil((tableTotals[tableName] || 0) / perPage);
+                if (tablePages[tableName] < totalPages) {
+                    tablePages[tableName]++;
+                    loadTableData(tableName);
+                }
+            });
+            
+            // Filters
+            if (tableName === 'log_files') {
+                document.getElementById('log_files-vehicle-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+                document.getElementById('log_files-status-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+            } else if (tableName === 'data_type_catalog') {
+                document.getElementById('data_type_catalog-vehicle-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+                document.getElementById('data_type_catalog-category-filter').addEventListener('input', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+            } else if (tableName === 'log_entries') {
+                document.getElementById('log_entries-vehicle-filter').addEventListener('change', (e) => {
+                    tablePages[tableName] = 1;
+                    loadDataTypesForLogEntries(e.target.value);
+                    loadTableData(tableName);
+                });
+                document.getElementById('log_entries-data-type-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+                document.getElementById('log_entries-start-time-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+                document.getElementById('log_entries-end-time-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+            } else if (tableName === 'settings_files') {
+                document.getElementById('settings_files-vehicle-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+                document.getElementById('settings_files-status-filter').addEventListener('change', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+            } else if (tableName === 'vehicle_settings') {
+                document.getElementById('vehicle_settings-file-id-filter').addEventListener('input', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+                document.getElementById('vehicle_settings-category-filter').addEventListener('input', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+                document.getElementById('vehicle_settings-name-filter').addEventListener('input', () => {
+                    tablePages[tableName] = 1;
+                    loadTableData(tableName);
+                });
+            }
+        });
+        
+        // Load vehicle types for filters
+        async function loadVehicleTypesForFilters() {
+            try {
+                const response = await fetch('/api/vehicle_types');
+                const types = await response.json();
+                
+                // Populate vehicle type filters for all tables that need it
+                ['log_files', 'data_type_catalog', 'log_entries', 'settings_files'].forEach(tableName => {
+                    const select = document.getElementById(`${tableName}-vehicle-filter`);
+                    if (select) {
+                        types.forEach(type => {
+                            const option = document.createElement('option');
+                            option.value = type;
+                            option.textContent = type;
+                            select.appendChild(option);
+                        });
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading vehicle types:', error);
+            }
+        }
+        
+        // Load data types for log_entries filter
+        async function loadDataTypesForLogEntries(vehicleType = '') {
+            try {
+                const url = vehicleType ? `/api/data_types?vehicle_type=${vehicleType}` : '/api/data_types';
+                const response = await fetch(url);
+                const types = await response.json();
+                const select = document.getElementById('log_entries-data-type-filter');
+                select.innerHTML = '<option value="">Tous</option>';
+                types.forEach(type => {
+                    const option = document.createElement('option');
+                    option.value = type;
+                    option.textContent = type;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading data types:', error);
+            }
+        }
+        
+        // Load USBL decoded messages
+        async function loadUsblDecodedMessages() {
+            const loading = document.getElementById('usbl_decoded-loading');
+            const error = document.getElementById('usbl_decoded-error');
+            const table = document.getElementById('usbl_decoded-table');
+            const thead = document.getElementById('usbl_decoded-thead');
+            const tbody = document.getElementById('usbl_decoded-tbody');
+            
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            table.style.display = 'none';
+            
+            try {
+                const params = new URLSearchParams({
+                    page: tablePages['usbl_decoded'] || 1,
+                    per_page: perPage
+                });
+                
+                const logFileId = document.getElementById('usbl_decoded-log-file-filter').value;
+                const direction = document.getElementById('usbl_decoded-direction-filter').value;
+                const messageName = document.getElementById('usbl_decoded-message-name-filter').value;
+                const startTime = document.getElementById('usbl_decoded-start-time-filter').value;
+                const endTime = document.getElementById('usbl_decoded-end-time-filter').value;
+                
+                if (logFileId) params.append('log_file_id', logFileId);
+                if (direction) params.append('direction', direction);
+                if (messageName) params.append('message_name', messageName);
+                if (startTime) params.append('start_time', startTime);
+                if (endTime) params.append('end_time', endTime);
+                
+                const response = await fetch(`/api/usbl/decoded_messages?${params}`);
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                    throw new Error(errorData.error || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                tableTotals['usbl_decoded'] = data.total;
+                tablePages['usbl_decoded'] = data.page;
+                
+                // Build table header dynamically
+                if (data.entries.length > 0) {
+                    const headerRow = document.createElement('tr');
+                    Object.keys(data.entries[0]).forEach(key => {
+                        if (key !== 'log_file_id') {  // Skip log_file_id, we have log_filename
+                            const th = document.createElement('th');
+                            th.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                            headerRow.appendChild(th);
+                        }
+                    });
+                    thead.innerHTML = '';
+                    thead.appendChild(headerRow);
+                    
+                    // Build table body
+                    tbody.innerHTML = '';
+                    data.entries.forEach(entry => {
+                        const row = document.createElement('tr');
+                        Object.keys(data.entries[0]).forEach(key => {
+                            if (key !== 'log_file_id') {
+                                const cell = document.createElement('td');
+                                let value = entry[key];
+                                
+                                // Format timestamps
+                                if (key.includes('time') || key.includes('timestamp') || key.includes('_at')) {
+                                    cell.textContent = formatTimestamp(value);
+                                }
+                                // Format payload_decoded with better styling
+                                else if (key === 'payload_decoded') {
+                                    cell.textContent = value || '-';
+                                    cell.style.maxWidth = '400px';
+                                    cell.style.wordBreak = 'break-word';
+                                }
+                                // Format other values
+                                else {
+                                    cell.textContent = formatValue(value);
+                                }
+                                row.appendChild(cell);
+                            }
+                        });
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    thead.innerHTML = '';
+                    tbody.innerHTML = '<tr><td colspan="100%" style="text-align: center; padding: 20px;">Aucune donnée disponible</td></tr>';
+                }
+                
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                document.getElementById('usbl_decoded-pagination').style.display = 'flex';
+                updateTablePagination('usbl_decoded');
+                
+            } catch (err) {
+                loading.style.display = 'none';
+                error.style.display = 'block';
+                error.textContent = `Erreur: ${err.message}`;
+            }
+        }
+        
+        // Load USBL log files for filter
+        async function loadUsblLogFiles() {
+            try {
+                const response = await fetch('/api/usbl/log_files');
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                    console.error('Error loading USBL log files:', errorData);
+                    return;
+                }
+                const files = await response.json();
+                if (!Array.isArray(files)) {
+                    console.error('Error: Expected array but got:', files);
+                    return;
+                }
+                const select = document.getElementById('usbl_decoded-log-file-filter');
+                select.innerHTML = '<option value="">Tous</option>';
+                files.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file.id;
+                    const decodedInfo = file.decoded_count > 0 ? ` (${file.decoded_count} messages décodés)` : ' (non décodé)';
+                    option.textContent = `${file.filename} (${file.vehicle_id})${decodedInfo}`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading USBL log files:', error);
+            }
+        }
+        
+        // Decode USBL file
+        async function decodeUsblFile(logFileId) {
+            if (!logFileId) {
+                alert('Veuillez sélectionner un fichier USBL');
+                return;
+            }
+            
+            const btn = document.getElementById('usbl_decoded-decode-btn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳</span> Décodage en cours...';
+            
+            try {
+                const response = await fetch(`/api/usbl/decode/${logFileId}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    alert(`✅ ${result.message}`);
+                    // Reload the file list and messages
+                    loadUsblLogFiles();
+                    loadUsblDecodedMessages();
+                } else {
+                    alert(`❌ Erreur: ${result.error || 'Erreur inconnue'}`);
+                }
+            } catch (error) {
+                alert(`❌ Erreur: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
             }
         }
         
@@ -629,404 +1325,9 @@
             }
         }
         
-        // Load vehicle types
-        async function loadVehicleTypes() {
-            try {
-                const response = await fetch('/api/vehicle_types');
-                const types = await response.json();
-                const select = document.getElementById('vehicle-filter');
-                types.forEach(type => {
-                    const option = document.createElement('option');
-                    option.value = type;
-                    option.textContent = type;
-                    select.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading vehicle types:', error);
-            }
-        }
-        
-        // Load data types
-        async function loadDataTypes(vehicleType = '') {
-            try {
-                const url = vehicleType ? `/api/data_types?vehicle_type=${vehicleType}` : '/api/data_types';
-                const response = await fetch(url);
-                const types = await response.json();
-                const select = document.getElementById('data-type-filter');
-                select.innerHTML = '<option value="">Tous</option>';
-                types.forEach(type => {
-                    const option = document.createElement('option');
-                    option.value = type;
-                    option.textContent = type;
-                    select.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading data types:', error);
-            }
-        }
-        
-        // Load log entries
-        async function loadLogEntries() {
-            const loading = document.getElementById('loading');
-            const error = document.getElementById('error');
-            const table = document.getElementById('data-table');
-            const tbody = document.getElementById('table-body');
-            
-            loading.style.display = 'block';
-            error.style.display = 'none';
-            table.style.display = 'none';
-            
-            try {
-                const params = new URLSearchParams({
-                    page: currentPage,
-                    per_page: perPage
-                });
-                
-                const vehicleType = document.getElementById('vehicle-filter').value;
-                if (vehicleType) params.append('vehicle_type', vehicleType);
-                
-                const dataType = document.getElementById('data-type-filter').value;
-                if (dataType) params.append('data_type', dataType);
-                
-                const startTime = document.getElementById('start-time-filter').value;
-                if (startTime) params.append('start_time', startTime);
-                
-                const endTime = document.getElementById('end-time-filter').value;
-                if (endTime) params.append('end_time', endTime);
-                
-                const response = await fetch(`/api/log_entries?${params}`);
-                const data = await response.json();
-                
-                totalPages = data.pages;
-                
-                tbody.innerHTML = '';
-                data.entries.forEach(entry => {
-                    const row = document.createElement('tr');
-                    const vehicleClass = entry.vehicle_type === 'USV' ? 'vehicle-usv' : 'vehicle-auv';
-                    // Format date with milliseconds - parse ISO format timestamp
-                    let fullDate;
-                    if (entry.time) {
-                        // Parse ISO format timestamp (e.g., "2025-11-23T14:04:54.117417+01:00")
-                        const date = new Date(entry.time);
-                        
-                        // Extract milliseconds from ISO string if available
-                        let ms = '000';
-                        if (entry.time.includes('.')) {
-                            // Extract fractional seconds from ISO string
-                            const fractionalMatch = entry.time.match(/\.(\d+)/);
-                            if (fractionalMatch) {
-                                const fractional = fractionalMatch[1];
-                                // Take first 3 digits for milliseconds
-                                ms = fractional.substring(0, 3).padEnd(3, '0');
-                            }
-                        } else {
-                            // Fallback to getMilliseconds() if no fractional part in string
-                            ms = date.getMilliseconds().toString().padStart(3, '0');
-                        }
-                        
-                        const dateStr = date.toLocaleString('fr-FR', {
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit'
-                        });
-                        fullDate = `${dateStr}.${ms}`;
-                    } else {
-                        fullDate = '-';
-                    }
-                    
-                    row.innerHTML = `
-                        <td>${fullDate}</td>
-                        <td><span class="vehicle-badge ${vehicleClass}">${entry.vehicle_type}</span></td>
-                        <td>${entry.vehicle_id || '-'}</td>
-                        <td>${entry.data_type}</td>
-                        <td>${parseFloat(entry.value).toLocaleString('fr-FR', {maximumFractionDigits: 6})}</td>
-                        <td>${entry.source_filename}</td>
-                    `;
-                    tbody.appendChild(row);
-                });
-                
-                loading.style.display = 'none';
-                table.style.display = 'table';
-                document.getElementById('pagination').style.display = 'flex';
-                updatePagination();
-                
-            } catch (err) {
-                loading.style.display = 'none';
-                error.style.display = 'block';
-                error.textContent = `Erreur: ${err.message}`;
-            }
-        }
-        
-        function updatePagination() {
-            document.getElementById('page-info').textContent = 
-                `Page ${currentPage} sur ${totalPages}`;
-            document.getElementById('prev-page').disabled = currentPage === 1;
-            document.getElementById('next-page').disabled = currentPage >= totalPages;
-        }
-        
-        // Event listeners
-        document.getElementById('prev-page').addEventListener('click', () => {
-            if (currentPage > 1) {
-                currentPage--;
-                loadLogEntries();
-            }
-        });
-        
-        document.getElementById('next-page').addEventListener('click', () => {
-            if (currentPage < totalPages) {
-                currentPage++;
-                loadLogEntries();
-            }
-        });
-        
-        document.getElementById('vehicle-filter').addEventListener('change', (e) => {
-            currentPage = 1;
-            loadDataTypes(e.target.value);
-            loadLogEntries();
-        });
-        
-        document.getElementById('data-type-filter').addEventListener('change', () => {
-            currentPage = 1;
-            loadLogEntries();
-        });
-        
-        document.getElementById('start-time-filter').addEventListener('change', () => {
-            currentPage = 1;
-            loadLogEntries();
-        });
-        
-        document.getElementById('end-time-filter').addEventListener('change', () => {
-            currentPage = 1;
-            loadLogEntries();
-        });
-        
-        // Load data types for multi-select (columns view)
-        async function loadDataTypesForMultiSelect() {
-            try {
-                const vehicleType = document.getElementById('vehicle-filter-col').value;
-                const url = vehicleType ? `/api/data_types?vehicle_type=${vehicleType}` : '/api/data_types';
-                const response = await fetch(url);
-                const types = await response.json();
-                const container = document.getElementById('data-types-multi-select');
-                container.innerHTML = '';
-                
-                // Select all by default
-                selectedDataTypes = types;
-                
-                types.forEach(type => {
-                    const label = document.createElement('label');
-                    label.innerHTML = `<input type="checkbox" value="${type}" checked onchange="updateSelectedDataTypes()"> ${type}`;
-                    container.appendChild(label);
-                });
-                
-                // Auto-load with all data types selected
-                if (types.length > 0) {
-                    currentPageCol = 1;
-                    loadLogEntriesPivoted();
-                }
-            } catch (error) {
-                console.error('Error loading data types:', error);
-            }
-        }
-        
-        function updateSelectedDataTypes() {
-            const checkboxes = document.querySelectorAll('#data-types-multi-select input[type="checkbox"]:checked');
-            selectedDataTypes = Array.from(checkboxes).map(cb => cb.value);
-        }
-        
-        // Load pivoted log entries (columns view)
-        async function loadLogEntriesPivoted() {
-            if (selectedDataTypes.length === 0) {
-                document.getElementById('loading-col').textContent = 'Sélectionnez au moins un type de donnée';
-                return;
-            }
-            
-            const loading = document.getElementById('loading-col');
-            const error = document.getElementById('error-col');
-            const table = document.getElementById('data-table-col');
-            const thead = document.getElementById('table-head-col');
-            const tbody = document.getElementById('table-body-col');
-            
-            loading.style.display = 'block';
-            error.style.display = 'none';
-            table.style.display = 'none';
-            
-            try {
-                const params = new URLSearchParams({
-                    page: currentPageCol,
-                    per_page: perPage
-                });
-                
-                selectedDataTypes.forEach(dt => params.append('data_types', dt));
-                
-                const vehicleType = document.getElementById('vehicle-filter-col').value;
-                if (vehicleType) params.append('vehicle_type', vehicleType);
-                
-                const startTime = document.getElementById('start-time-filter-col').value;
-                if (startTime) params.append('start_time', startTime);
-                
-                const endTime = document.getElementById('end-time-filter-col').value;
-                if (endTime) params.append('end_time', endTime);
-                
-                const response = await fetch(`/api/log_entries_pivoted?${params}`);
-                const data = await response.json();
-                
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                
-                totalPagesCol = data.pages;
-                
-                // Build table header with selected data types as columns
-                const headerRow = document.createElement('tr');
-                headerRow.innerHTML = '<th>Date/Heure</th><th>Véhicule</th><th>ID Véhicule</th>';
-                selectedDataTypes.forEach(dt => {
-                    const th = document.createElement('th');
-                    th.textContent = dt;
-                    headerRow.appendChild(th);
-                });
-                thead.innerHTML = '';
-                thead.appendChild(headerRow);
-                
-                // Build table body
-                tbody.innerHTML = '';
-                data.entries.forEach(entry => {
-                    const row = document.createElement('tr');
-                    const vehicleClass = entry.vehicle_type === 'USV' ? 'vehicle-usv' : 'vehicle-auv';
-                    
-                    // Format date with milliseconds - parse ISO format timestamp
-                    let fullDate;
-                    if (entry.time) {
-                        // Parse ISO format timestamp (e.g., "2025-11-23T14:04:54.117417+01:00")
-                        const date = new Date(entry.time);
-                        
-                        // Extract milliseconds from ISO string if available
-                        let ms = '000';
-                        if (entry.time.includes('.')) {
-                            // Extract fractional seconds from ISO string
-                            const fractionalMatch = entry.time.match(/\.(\d+)/);
-                            if (fractionalMatch) {
-                                const fractional = fractionalMatch[1];
-                                // Take first 3 digits for milliseconds
-                                ms = fractional.substring(0, 3).padEnd(3, '0');
-                            }
-                        } else {
-                            // Fallback to getMilliseconds() if no fractional part in string
-                            ms = date.getMilliseconds().toString().padStart(3, '0');
-                        }
-                        
-                        const dateStr = date.toLocaleString('fr-FR', {
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit'
-                        });
-                        fullDate = `${dateStr}.${ms}`;
-                    } else {
-                        fullDate = '-';
-                    }
-                    
-                    // Create cells in order to ensure alignment
-                    const timeCell = document.createElement('td');
-                    timeCell.textContent = fullDate;
-                    row.appendChild(timeCell);
-                    
-                    const vehicleCell = document.createElement('td');
-                    const badge = document.createElement('span');
-                    badge.className = `vehicle-badge ${vehicleClass}`;
-                    badge.textContent = entry.vehicle_type;
-                    vehicleCell.appendChild(badge);
-                    row.appendChild(vehicleCell);
-                    
-                    const vehicleIdCell = document.createElement('td');
-                    vehicleIdCell.textContent = entry.vehicle_id || '-';
-                    row.appendChild(vehicleIdCell);
-                    
-                    // Add value for each selected data type in the same order as header
-                    selectedDataTypes.forEach(dt => {
-                        const cell = document.createElement('td');
-                        const value = entry[dt];
-                        if (value !== null && value !== undefined) {
-                            cell.textContent = parseFloat(value).toLocaleString('fr-FR', {maximumFractionDigits: 6});
-                        } else {
-                            cell.textContent = '-';
-                        }
-                        row.appendChild(cell);
-                    });
-                    
-                    tbody.appendChild(row);
-                });
-                
-                loading.style.display = 'none';
-                table.style.display = 'table';
-                document.getElementById('pagination-col').style.display = 'flex';
-                updatePaginationCol();
-                
-            } catch (err) {
-                loading.style.display = 'none';
-                error.style.display = 'block';
-                error.textContent = `Erreur: ${err.message}`;
-            }
-        }
-        
-        function updatePaginationCol() {
-            document.getElementById('page-info-col').textContent = 
-                `Page ${currentPageCol} sur ${totalPagesCol}`;
-            document.getElementById('prev-page-col').disabled = currentPageCol === 1;
-            document.getElementById('next-page-col').disabled = currentPageCol >= totalPagesCol;
-        }
-        
-        // Event listeners for columns view
-        document.getElementById('prev-page-col').addEventListener('click', () => {
-            if (currentPageCol > 1) {
-                currentPageCol--;
-                loadLogEntriesPivoted();
-            }
-        });
-        
-        document.getElementById('next-page-col').addEventListener('click', () => {
-            if (currentPageCol < totalPagesCol) {
-                currentPageCol++;
-                loadLogEntriesPivoted();
-            }
-        });
-        
-        document.getElementById('vehicle-filter-col').addEventListener('change', (e) => {
-            currentPageCol = 1;
-            loadDataTypesForMultiSelect();
-        });
-        
-        document.getElementById('start-time-filter-col').addEventListener('change', () => {
-            currentPageCol = 1;
-            if (selectedDataTypes.length > 0) loadLogEntriesPivoted();
-        });
-        
-        document.getElementById('end-time-filter-col').addEventListener('change', () => {
-            currentPageCol = 1;
-            if (selectedDataTypes.length > 0) loadLogEntriesPivoted();
-        });
-        
-        // Auto-load when data types are selected
-        function updateSelectedDataTypes() {
-            const checkboxes = document.querySelectorAll('#data-types-multi-select input[type="checkbox"]:checked');
-            selectedDataTypes = Array.from(checkboxes).map(cb => cb.value);
-            if (selectedDataTypes.length > 0) {
-                currentPageCol = 1;
-                loadLogEntriesPivoted();
-            } else {
-                document.getElementById('loading-col').textContent = 'Sélectionnez au moins un type de donnée';
-                document.getElementById('data-table-col').style.display = 'none';
-                document.getElementById('pagination-col').style.display = 'none';
-            }
-        }
-        
         // Runs chart
         let runsData = [];
+        let videosData = [];
         let runsTimeRange = { min: null, max: null };
         let runsZoomLevel = 1;
         let runsPanOffset = 0;
@@ -1043,13 +1344,32 @@
                 if (startTime) params.append('start_time', startTime);
                 if (endTime) params.append('end_time', endTime);
                 
+                // Load runs
                 const response = await fetch(`/api/runs?${params}`);
                 runsData = await response.json();
                 
-                if (runsData.length > 0) {
-                    // Calculate time range
-                    runsTimeRange.min = Math.min(...runsData.map(r => new Date(r.first_timestamp).getTime()));
-                    runsTimeRange.max = Math.max(...runsData.map(r => new Date(r.last_timestamp).getTime()));
+                // Load videos
+                const videoParams = new URLSearchParams();
+                if (startTime) videoParams.append('start_time', startTime);
+                if (endTime) videoParams.append('end_time', endTime);
+                
+                const videoResponse = await fetch(`/api/videos_for_runs?${videoParams}`);
+                videosData = await videoResponse.json();
+                
+                // Calculate time range from both runs and videos
+                const allTimestamps = [];
+                runsData.forEach(r => {
+                    allTimestamps.push(new Date(r.first_timestamp).getTime());
+                    allTimestamps.push(new Date(r.last_timestamp).getTime());
+                });
+                videosData.forEach(v => {
+                    allTimestamps.push(new Date(v.start_time).getTime());
+                    allTimestamps.push(new Date(v.end_time).getTime());
+                });
+                
+                if (allTimestamps.length > 0) {
+                    runsTimeRange.min = Math.min(...allTimestamps);
+                    runsTimeRange.max = Math.max(...allTimestamps);
                 }
                 
                 runsZoomLevel = 1;
@@ -1155,11 +1475,11 @@
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            if (runsData.length === 0) {
+            if (runsData.length === 0 && videosData.length === 0) {
                 ctx.fillStyle = '#666';
                 ctx.font = '16px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText('Aucun run trouvé', canvas.width / 2, canvas.height / 2);
+                ctx.fillText('Aucun run ou vidéo trouvé', canvas.width / 2, canvas.height / 2);
                 return;
             }
             
@@ -1173,8 +1493,24 @@
                 runsByVehicle[vehicleId].push(run);
             });
             
+            // Group videos by camera_id
+            const videosByCamera = {};
+            videosData.forEach(video => {
+                const cameraId = video.camera_id;
+                if (cameraId !== null && cameraId !== undefined) {
+                    if (!videosByCamera[cameraId]) {
+                        videosByCamera[cameraId] = [];
+                    }
+                    videosByCamera[cameraId].push(video);
+                }
+            });
+            
             const vehicleIds = Object.keys(runsByVehicle).sort();
+            const cameraIds = Object.keys(videosByCamera).sort((a, b) => parseInt(a) - parseInt(b));
+            const totalRows = vehicleIds.length + cameraIds.length;
+            
             const colors = ['#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6f42c1'];
+            const videoColors = ['#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3', '#00bcd4'];
             
             // Calculate dimensions - FIXED values that don't change with zoom
             const padding = { top: 40, right: 100, bottom: 60, left: 150 };
@@ -1184,11 +1520,11 @@
             const minRowHeight = 40;
             const maxRowHeight = 60;
             const availableHeight = canvas.height - padding.top - padding.bottom;
-            const calculatedRowHeight = availableHeight / Math.max(vehicleIds.length, 1);
+            const calculatedRowHeight = availableHeight / Math.max(totalRows, 1);
             const rowHeight = Math.max(minRowHeight, Math.min(maxRowHeight, calculatedRowHeight));
             
-            // Calculate FIXED chart height based on number of vehicles (doesn't change with zoom)
-            const chartHeight = Math.max(vehicleIds.length * rowHeight, 200);
+            // Calculate FIXED chart height based on number of rows (vehicles + cameras)
+            const chartHeight = Math.max(totalRows * rowHeight, 200);
             
             // FIXED Y position for time axis (bottom of chart area) - never changes with zoom
             const timeAxisY = padding.top + chartHeight;
@@ -1238,9 +1574,11 @@
             
             // Draw vehicle labels and bars
             // Use fixed positioning for Y axis - doesn't change with zoom
+            let currentRow = 0;
+            
             vehicleIds.forEach((vehicleId, vehicleIdx) => {
                 // Fixed Y position based on row index, not affected by zoom
-                const y = padding.top + (vehicleIdx * rowHeight) + (rowHeight / 2);
+                const y = padding.top + (currentRow * rowHeight) + (rowHeight / 2);
                 const color = colors[vehicleIdx % colors.length];
                 
                 // Vehicle label
@@ -1282,6 +1620,61 @@
                         drawDepthGraphSync(ctx, runsDepthCache[run.id], x1, barY, barWidth, barHeight, start, end, visibleStart, visibleEnd);
                     }
                 });
+                
+                currentRow++;
+            });
+            
+            // Draw video labels and bars by camera_id
+            cameraIds.forEach((cameraId, cameraIdx) => {
+                // Fixed Y position based on row index, not affected by zoom
+                const y = padding.top + (currentRow * rowHeight) + (rowHeight / 2);
+                const color = videoColors[cameraIdx % videoColors.length];
+                
+                // Camera label
+                ctx.fillStyle = '#333';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(`Cam ${cameraId}`, padding.left - 10, y + 5);
+                
+                // Draw videos for this camera
+                const videos = videosByCamera[cameraId];
+                videos.forEach(video => {
+                    const start = new Date(video.start_time).getTime();
+                    const end = new Date(video.end_time).getTime();
+                    
+                    // Check if video is visible
+                    if (end < visibleStart || start > visibleEnd) return;
+                    
+                    // Calculate bar position
+                    const barStart = Math.max(start, visibleStart);
+                    const barEnd = Math.min(end, visibleEnd);
+                    const x1 = padding.left + ((barStart - visibleStart) / (visibleEnd - visibleStart)) * chartWidth;
+                    const x2 = padding.left + ((barEnd - visibleStart) / (visibleEnd - visibleStart)) * chartWidth;
+                    const barWidth = Math.max(2, x2 - x1);
+                    
+                    const barY = y - rowHeight / 2 + 2;
+                    const barHeight = rowHeight - 4;
+                    
+                    // Draw bar background
+                    ctx.fillStyle = color;
+                    ctx.fillRect(x1, barY, barWidth, barHeight);
+                    
+                    // Draw border
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x1, barY, barWidth, barHeight);
+                    
+                    // Optional: Add video duration as text (if bar is wide enough)
+                    if (barWidth > 50) {
+                        ctx.fillStyle = '#fff';
+                        ctx.font = '10px sans-serif';
+                        ctx.textAlign = 'left';
+                        const duration = (video.duration_seconds / 60).toFixed(1);
+                        ctx.fillText(`${duration}m`, x1 + 3, y + 3);
+                    }
+                });
+                
+                currentRow++;
             });
             
             // Store AUV run bars for click detection (outside the loop to avoid multiple listeners)
@@ -1785,29 +2178,245 @@
             }
         });
         
-        // Initialize
-        loadStats();
-        loadVehicleTypes();
-        loadDataTypes();
-        loadLogEntries();
+        // Setup event listeners for USBL decoded messages
+        document.getElementById('usbl_decoded-prev-page').addEventListener('click', () => {
+            if (tablePages['usbl_decoded'] > 1) {
+                tablePages['usbl_decoded']--;
+                loadUsblDecodedMessages();
+            }
+        });
         
-        // Load vehicle types for columns view
-        async function loadVehicleTypesCol() {
+        document.getElementById('usbl_decoded-next-page').addEventListener('click', () => {
+            const totalPages = Math.ceil((tableTotals['usbl_decoded'] || 0) / perPage);
+            if (tablePages['usbl_decoded'] < totalPages) {
+                tablePages['usbl_decoded']++;
+                loadUsblDecodedMessages();
+            }
+        });
+        
+        document.getElementById('usbl_decoded-log-file-filter').addEventListener('change', () => {
+            tablePages['usbl_decoded'] = 1;
+            loadUsblDecodedMessages();
+        });
+        
+        document.getElementById('usbl_decoded-direction-filter').addEventListener('change', () => {
+            tablePages['usbl_decoded'] = 1;
+            loadUsblDecodedMessages();
+        });
+        
+        document.getElementById('usbl_decoded-message-name-filter').addEventListener('input', () => {
+            tablePages['usbl_decoded'] = 1;
+            loadUsblDecodedMessages();
+        });
+        
+        document.getElementById('usbl_decoded-start-time-filter').addEventListener('change', () => {
+            tablePages['usbl_decoded'] = 1;
+            loadUsblDecodedMessages();
+        });
+        
+        document.getElementById('usbl_decoded-end-time-filter').addEventListener('change', () => {
+            tablePages['usbl_decoded'] = 1;
+            loadUsblDecodedMessages();
+        });
+        
+        document.getElementById('usbl_decoded-decode-btn').addEventListener('click', () => {
+            const logFileId = document.getElementById('usbl_decoded-log-file-filter').value;
+            if (logFileId) {
+                if (confirm('Voulez-vous décoder ce fichier USBL ? Les messages déjà décodés seront remplacés.')) {
+                    decodeUsblFile(logFileId);
+                }
+            } else {
+                alert('Veuillez sélectionner un fichier USBL');
+            }
+        });
+        
+        // Video management functions
+        let videos = [];
+        
+        async function loadVideos() {
+            const loading = document.getElementById('videos-loading');
+            const error = document.getElementById('videos-error');
+            const table = document.getElementById('videos-table');
+            const tbody = document.getElementById('videos-tbody');
+            
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            table.style.display = 'none';
+            
             try {
-                const response = await fetch('/api/vehicle_types');
-                const types = await response.json();
-                const select = document.getElementById('vehicle-filter-col');
-                types.forEach(type => {
-                    const option = document.createElement('option');
-                    option.value = type;
-                    option.textContent = type;
-                    select.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading vehicle types:', error);
+                const response = await fetch('/api/videos');
+                if (!response.ok) throw new Error('Erreur lors du chargement des vidéos');
+                
+                videos = await response.json();
+                tbody.innerHTML = '';
+                
+                if (videos.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 20px;">Aucune vidéo importée</td></tr>';
+                } else {
+                    videos.forEach(video => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${escapeHtml(video.filename)}</td>
+                            <td>${video.start_time ? new Date(video.start_time).toLocaleString('fr-FR') : '-'}</td>
+                            <td>
+                                <input type="number" step="0.1" value="${video.time_offset_seconds || 0}" 
+                                       data-video-id="${video.id}" 
+                                       class="offset-input" 
+                                       style="width: 100px; padding: 4px;">
+                            </td>
+                            <td>${video.effective_start_time ? new Date(video.effective_start_time).toLocaleString('fr-FR') : '-'}</td>
+                            <td>${video.duration_seconds ? formatDuration(video.duration_seconds) : '-'}</td>
+                            <td>
+                                <input type="number" value="${video.camera_id || ''}" 
+                                       data-video-id="${video.id}" 
+                                       class="camera-input" 
+                                       placeholder="ID caméra"
+                                       style="width: 80px; padding: 4px;">
+                            </td>
+                            <td>
+                                <span class="status-badge status-${video.thumbnail_status}">${getStatusLabel(video.thumbnail_status)}</span>
+                            </td>
+                            <td>${video.run_id ? `<a href="/run/${video.run_id}">Run ${video.run_id}</a>` : '-'}</td>
+                            <td>
+                                <button class="btn btn-success" onclick="saveVideoOffset(${video.id})" style="padding: 4px 8px; font-size: 12px;">
+                                    Sauvegarder
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                }
+                
+                table.style.display = 'table';
+                loading.style.display = 'none';
+            } catch (err) {
+                error.textContent = `Erreur: ${err.message}`;
+                error.style.display = 'block';
+                loading.style.display = 'none';
             }
         }
-        loadVehicleTypesCol();
+        
+        function formatDuration(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+        
+        function getStatusLabel(status) {
+            const labels = {
+                'pending': 'En attente',
+                'processing': 'En cours',
+                'completed': 'Terminé',
+                'failed': 'Échoué'
+            };
+            return labels[status] || status;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        async function saveVideoOffset(videoId) {
+            const offsetInput = document.querySelector(`input[data-video-id="${videoId}"].offset-input`);
+            const cameraInput = document.querySelector(`input[data-video-id="${videoId}"].camera-input`);
+            const offset = parseFloat(offsetInput.value) || 0;
+            const cameraId = cameraInput.value ? parseInt(cameraInput.value) : null;
+            
+            try {
+                // Update offset
+                const offsetResponse = await fetch(`/api/videos/${videoId}/offset`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ time_offset_seconds: offset })
+                });
+                
+                if (!offsetResponse.ok) throw new Error('Erreur lors de la sauvegarde de l\'offset');
+                
+                // Update camera_id
+                const cameraResponse = await fetch(`/api/videos/${videoId}/camera`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ camera_id: cameraId })
+                });
+                
+                if (!cameraResponse.ok) throw new Error('Erreur lors de la sauvegarde du camera_id');
+                
+                // Reload videos to update display
+                await loadVideos();
+                alert('Modifications sauvegardées avec succès');
+            } catch (err) {
+                alert(`Erreur: ${err.message}`);
+            }
+        }
+        
+        // Handle video file upload
+        document.getElementById('video-file-input').addEventListener('change', async function(e) {
+            const files = e.target.files;
+            if (files.length === 0) return;
+            
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+            
+            const overlay = document.getElementById('loading-overlay');
+            const message = document.getElementById('loading-message');
+            if (overlay && message) {
+                overlay.classList.add('active');
+                message.textContent = `Upload de ${files.length} vidéo(s)...`;
+            }
+            
+            try {
+                const response = await fetch('/api/videos/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Erreur lors de l\'upload');
+                }
+                
+                const result = await response.json();
+                if (message) {
+                    message.textContent = `✅ ${result.message}`;
+                }
+                
+                // Reload videos
+                await loadVideos();
+                
+                if (overlay) {
+                    setTimeout(() => {
+                        overlay.classList.remove('active');
+                    }, 2000);
+                }
+            } catch (err) {
+                if (message) {
+                    message.textContent = `❌ Erreur: ${err.message}`;
+                }
+                if (overlay) {
+                    setTimeout(() => {
+                        overlay.classList.remove('active');
+                    }, 3000);
+                }
+            } finally {
+                e.target.value = '';
+            }
+        });
+        
+        // Initialize
+        loadStats();
+        loadVehicleTypesForFilters();
+        loadDataTypesForLogEntries();
+        loadUsblLogFiles();
+        loadTableData('log_files'); // Load first table by default
     </script>
 </body>
 </html>

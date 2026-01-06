@@ -127,13 +127,13 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 20px;
+            align-items: start;
         }
         
         .left-column {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
+            display: contents;
         }
+        
         
         .panel {
             background: white;
@@ -335,6 +335,19 @@
             user-select: none;
         }
         
+        #battery-chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #battery-chart {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+            user-select: none;
+        }
+        
         .altitude-controls {
             display: flex;
             flex-wrap: wrap;
@@ -512,6 +525,136 @@
         .time-range-display.active {
             display: block;
         }
+        
+        /* Fullscreen and drag styles */
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .panel-header h2 {
+            margin: 0;
+            flex: 1;
+        }
+        
+        .panel-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        
+        .fullscreen-btn, .drag-handle {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 6px 10px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #495057;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .fullscreen-btn:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+        }
+        
+        .drag-handle {
+            cursor: move;
+            cursor: grab;
+        }
+        
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+        
+        .panel.dragging {
+            opacity: 0.5;
+            z-index: 1000;
+        }
+        
+        .panel.drag-over {
+            border: 2px dashed #007bff;
+        }
+        
+        /* Fullscreen mode */
+        .panel.fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+            background: white;
+            border-radius: 0;
+            padding: 20px;
+        }
+        
+        .panel.fullscreen .panel-header {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            z-index: 10000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 10px 15px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .panel.fullscreen .panel-header h2 {
+            color: #333;
+        }
+        
+        .panel.fullscreen .fullscreen-btn {
+            background: #f8f9fa;
+            border-color: #dee2e6;
+            color: #495057;
+        }
+        
+        .panel.fullscreen .fullscreen-btn:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+        }
+        
+        .panel.fullscreen #depth-chart-container,
+        .panel.fullscreen #altitude-chart-container,
+        .panel.fullscreen #motors-chart-container,
+        .panel.fullscreen #derived-chart-container,
+        .panel.fullscreen #state-chart-container,
+        .panel.fullscreen #bearing-ping-chart-container,
+        .panel.fullscreen #orientation-chart-container,
+        .panel.fullscreen #water-temp-chart-container,
+        .panel.fullscreen #battery-chart-container,
+        .panel.fullscreen #usbl-azimuth-elevation-chart-container,
+        .panel.fullscreen #usbl-distance-chart-container,
+        .panel.fullscreen #usv-full-auv-chart-container {
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            right: 20px;
+            bottom: 20px;
+            min-height: auto;
+        }
+        
+        /* Grid layout: 2 columns, fixed */
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            align-items: start;
+        }
+        
+        .left-column {
+            display: contents;
+        }
+        
+        
     </style>
 </head>
 <body>
@@ -521,7 +664,7 @@
         <h1>Run: {{ run.filename }}</h1>
         <div class="header-info">
             <strong>Véhicule:</strong> {{ run.vehicle_type }} {{ run.vehicle_id }} | 
-            <strong>Période:</strong> {{ run.first_timestamp }} - {{ run.last_timestamp }} | 
+            <strong>Période:</strong> <span id="actual-start-time">{{ run.first_timestamp }}</span> - <span id="actual-end-time">{{ run.last_timestamp }}</span> | 
             <strong>Entrées:</strong> {{ run.row_count }}
         </div>
     </div>
@@ -545,8 +688,14 @@
     
     <div class="content">
         <div class="left-column">
-            <div class="panel">
-                <h2>Profondeur AUV</h2>
+            <div class="panel" data-panel-id="depth" data-chart-id="depth">
+                <div class="panel-header">
+                    <h2>Profondeur AUV</h2>
+                    <div class="panel-controls">
+                        <button class="fullscreen-btn" onclick="toggleFullscreen('depth')" title="Plein écran">⛶</button>
+                        <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                    </div>
+                </div>
                 <div id="depth-legend" class="state-legend"></div>
                 <div id="depth-chart-container">
                     <canvas id="depth-chart"></canvas>
@@ -556,8 +705,14 @@
                 </div>
             </div>
             
-            <div class="panel">
-                <h2>Altitude et OA AUV</h2>
+            <div class="panel" data-panel-id="altitude" data-chart-id="altitude">
+                <div class="panel-header">
+                    <h2>Altitude et OA AUV</h2>
+                    <div class="panel-controls">
+                        <button class="fullscreen-btn" onclick="toggleFullscreen('altitude')" title="Plein écran">⛶</button>
+                        <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                    </div>
+                </div>
                 <div class="altitude-controls">
                     <label>
                         <input type="checkbox" id="show-altitude-kogger" checked>
@@ -592,9 +747,12 @@
             </div>
         </div>
         
-        <div class="panel">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h2 style="margin: 0;">Trajectoires</h2>
+        <div class="panel" data-panel-id="trajectories">
+            <div class="panel-header">
+                <h2>Trajectoires</h2>
+                <div class="panel-controls">
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
             </div>
             <div class="derived-controls">
                 <label>
@@ -621,8 +779,14 @@
             <div id="map"></div>
         </div>
         
-        <div class="panel">
-            <h2>USV Full AUV Tracking</h2>
+        <div class="panel" data-panel-id="usv-full-auv" data-chart-id="usv-full-auv">
+            <div class="panel-header">
+                <h2>USV Full AUV Tracking</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('usv-full-auv')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div class="derived-controls">
                 <label>
                     <input type="checkbox" id="show-usv-full-distance" checked>
@@ -646,24 +810,42 @@
             </div>
         </div>
         
-        <div class="panel">
-            <h2>État AUV (StateNb)</h2>
+        <div class="panel" data-panel-id="state" data-chart-id="state">
+            <div class="panel-header">
+                <h2>État AUV (StateNb)</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('state')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div id="state-chart-container">
                 <canvas id="state-chart"></canvas>
                 <div class="cursor-line" id="cursor-line-state" style="display: none;"></div>
             </div>
         </div>
         
-        <div class="panel">
-            <h2>Bearing Ping AUV</h2>
+        <div class="panel" data-panel-id="bearing-ping" data-chart-id="bearingPing">
+            <div class="panel-header">
+                <h2>Bearing Ping AUV</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('bearing-ping')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div id="bearing-ping-chart-container">
                 <canvas id="bearing-ping-chart"></canvas>
                 <div class="cursor-line" id="cursor-line-bearing-ping" style="display: none;"></div>
             </div>
         </div>
         
-        <div class="panel">
-            <h2>Orientation AUV (Roll/Pitch/Yaw/Heading)</h2>
+        <div class="panel" data-panel-id="orientation" data-chart-id="orientation">
+            <div class="panel-header">
+                <h2>Orientation AUV (Roll/Pitch/Yaw/Heading)</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('orientation')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div class="orientation-controls">
                 <label>
                     <input type="checkbox" id="show-roll" checked>
@@ -692,32 +874,87 @@
             </div>
         </div>
         
-        <div class="panel">
-            <h2>Température de l'eau AUV</h2>
+        <div class="panel" data-panel-id="water-temp" data-chart-id="waterTemp">
+            <div class="panel-header">
+                <h2>Température de l'eau AUV</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('water-temp')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div id="water-temp-chart-container">
                 <canvas id="water-temp-chart"></canvas>
                 <div class="cursor-line" id="cursor-line-water-temp" style="display: none;"></div>
             </div>
         </div>
         
-        <div class="panel">
-            <h2>USBL Azimuth et Elevation</h2>
+        <div class="panel" data-panel-id="battery" data-chart-id="battery">
+            <div class="panel-header">
+                <h2>Batterie AUV</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('battery')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
+            <div class="altitude-controls">
+                <label>
+                    <input type="checkbox" id="show-battcurrent" checked>
+                    <span class="altitude-color-indicator" style="background: #007bff;"></span>
+                    BattCurrent
+                </label>
+                <label>
+                    <input type="checkbox" id="show-battlevel" checked>
+                    <span class="altitude-color-indicator" style="background: #28a745;"></span>
+                    BattLevel
+                </label>
+                <label>
+                    <input type="checkbox" id="show-batvoltage" checked>
+                    <span class="altitude-color-indicator" style="background: #dc3545;"></span>
+                    BatVoltage
+                </label>
+            </div>
+            <div id="battery-chart-container">
+                <canvas id="battery-chart"></canvas>
+                <div class="cursor-line" id="cursor-line-battery" style="display: none;"></div>
+            </div>
+        </div>
+        
+        <div class="panel" data-panel-id="usbl-azimuth-elevation" data-chart-id="usbl-azimuth-elevation">
+            <div class="panel-header">
+                <h2>USBL Azimuth et Elevation</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('usbl-azimuth-elevation')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div id="usbl-azimuth-elevation-chart-container">
                 <canvas id="usbl-azimuth-elevation-chart"></canvas>
                 <div class="cursor-line" id="cursor-line-usbl-azimuth-elevation" style="display: none;"></div>
             </div>
         </div>
         
-        <div class="panel">
-            <h2>USBL Distance</h2>
+        <div class="panel" data-panel-id="usbl-distance" data-chart-id="usbl-distance">
+            <div class="panel-header">
+                <h2>USBL Distance</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('usbl-distance')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div id="usbl-distance-chart-container">
                 <canvas id="usbl-distance-chart"></canvas>
                 <div class="cursor-line" id="cursor-line-usbl-distance" style="display: none;"></div>
             </div>
         </div>
         
-        <div class="panel">
-            <h2>Moteurs (M1-M8)</h2>
+        <div class="panel" data-panel-id="motors" data-chart-id="motors">
+            <div class="panel-header">
+                <h2>Moteurs (M1-M8)</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('motors')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div class="motor-controls">
                 <label>
                     <input type="checkbox" id="show-m1" checked>
@@ -766,8 +1003,14 @@
             </div>
         </div>
         
-        <div class="panel">
-            <h2>Avant / Yaw / Up</h2>
+        <div class="panel" data-panel-id="derived" data-chart-id="derived">
+            <div class="panel-header">
+                <h2>Avant / Yaw / Up</h2>
+                <div class="panel-controls">
+                    <button class="fullscreen-btn" onclick="toggleFullscreen('derived')" title="Plein écran">⛶</button>
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
             <div class="derived-controls">
                 <label>
                     <input type="checkbox" id="show-avant" checked>
@@ -791,6 +1034,22 @@
             </div>
         </div>
         
+        <div class="panel" data-panel-id="video">
+            <div class="panel-header">
+                <h2>Vidéo</h2>
+                <div class="panel-controls">
+                    <span class="drag-handle" title="Déplacer">⋮⋮</span>
+                </div>
+            </div>
+            <div id="video-thumbnail-container" style="text-align: center; padding: 20px; min-height: 200px; background: #f8f9fa; border-radius: 4px;">
+                <div id="video-thumbnail-placeholder" style="color: #666;">
+                    Aucune vidéo associée à ce run
+                </div>
+                <img id="video-thumbnail" style="max-width: 100%; max-height: 400px; display: none; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" alt="Thumbnail vidéo">
+                <div id="video-time-difference" style="margin-top: 10px; font-size: 14px; color: #666; display: none;"></div>
+            </div>
+        </div>
+        
     </div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -811,6 +1070,7 @@
         let bearingPingDataFull = []; // BearingPing data (AUV)
         let orientationDataFull = {}; // Orientation data (Roll, Pitch, Yaw, Heading) - object with keys: 'Roll', 'Pitch', 'Yaw', 'Heading'
         let waterTempDataFull = []; // Water temperature data (AUV)
+        let batteryDataFull = {}; // Battery data - object with keys: 'BattCurrent', 'BattLevel', 'BattVoltage'
         let altitudeDataFull = {}; // Altitude data - object with keys: 'Altitude Kogger', 'Altitude Kogger raw', 'Altitude OA', 'Altitude OA filt'
         let usblBearingDataFull = []; // USBL bearing (azimuth) data (USV)
         let usblBearingData = []; // Filtered USBL bearing data
@@ -843,6 +1103,7 @@
         let bearingPingYRange = null;
         let orientationYRange = null;
         let waterTempYRange = null;
+        let batteryYRange = null;
         let altitudeYRange = null;
         let usblAzimuthElevationYRange = null; // Y-axis zoom range for USBL azimuth/elevation chart
         let usblDistanceYRange = null; // Y-axis zoom range for USBL distance chart
@@ -859,6 +1120,7 @@
         let bearingPingData = []; // Filtered BearingPing data (AUV)
         let orientationData = {}; // Filtered orientation data (AUV) - object with keys: 'Roll', 'Pitch', 'Yaw', 'Heading'
         let waterTempData = []; // Filtered water temperature data (AUV)
+        let batteryData = {}; // Filtered battery data - object with keys: 'BattCurrent', 'BattLevel', 'BattVoltage'
         
         let selectedTime = null;
         let timeRange = { start: null, end: null }; // Selected time range for zoom (temporary, used to set displayStartTime/displayEndTime)
@@ -906,6 +1168,10 @@
         let showAltitudeOA = true;
         let showAltitudeOAFilt = true;
         let showTargetAltitude = true;
+        
+        let showBattCurrent = true;
+        let showBattLevel = true;
+        let showBatVoltage = true;
         
         // Trajectory visibility
         let showUsvTrajectory = true;
@@ -1192,6 +1458,11 @@
         const waterTempCtx = waterTempCanvas ? waterTempCanvas.getContext('2d') : null;
         const waterTempContainer = document.getElementById('water-temp-chart-container');
         const waterTempCursorLine = document.getElementById('cursor-line-water-temp');
+        
+        const batteryCanvas = document.getElementById('battery-chart');
+        const batteryCtx = batteryCanvas ? batteryCanvas.getContext('2d') : null;
+        const batteryContainer = document.getElementById('battery-chart-container');
+        const batteryCursorLine = document.getElementById('cursor-line-battery');
         
         const usblAzimuthElevationCanvas = document.getElementById('usbl-azimuth-elevation-chart');
         const usblAzimuthElevationCtx = usblAzimuthElevationCanvas ? usblAzimuthElevationCanvas.getContext('2d') : null;
@@ -1597,6 +1868,14 @@
             });
         }
         
+        function resizeBatteryCanvas() {
+            resizeCanvasGeneric(batteryCanvas, batteryContainer, batteryCtx, 'Battery', () => {
+                if (batteryData && typeof batteryData === 'object' && Object.keys(batteryData).length > 0) {
+                    drawBatteryChart();
+                }
+            });
+        }
+        
         window.addEventListener('resize', () => {
             resizeCanvas();
             resizeMotorsCanvas();
@@ -1605,6 +1884,7 @@
             resizeBearingPingCanvas();
             resizeOrientationCanvas();
             resizeWaterTempCanvas();
+            resizeBatteryCanvas();
             resizeUSBLAzimuthElevationCanvas();
             resizeUSBLDistanceCanvas();
             resizeUSVFullAuvCanvas();
@@ -1632,30 +1912,55 @@
                 window.depthDataFull = depthDataFull;
                 console.log(`Loaded ${depthDataFull.length} depth points (full dataset)`);
                 
-                // Initialize display range if not set (use first and last timestamp from data)
-                if (displayStartTime === null || displayEndTime === null) {
-                    if (depthDataFull.length > 0) {
-                        const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
-                        // Use loop to avoid stack overflow with large arrays
-                        let minTime = Infinity;
-                        let maxTime = -Infinity;
-                        for (let i = 0; i < allTimes.length; i++) {
-                            if (allTimes[i] < minTime) minTime = allTimes[i];
-                            if (allTimes[i] > maxTime) maxTime = allTimes[i];
-                        }
-                        displayStartTime = minTime;
-                        displayEndTime = maxTime;
-                        window.displayStartTime = displayStartTime;
-                        window.displayEndTime = displayEndTime;
-                        console.log(`Initialized display range: ${new Date(displayStartTime).toISOString()} to ${new Date(displayEndTime).toISOString()}`);
-                    } else if (runStartTime && runEndTime) {
-                        // Fallback to run times
-                        displayStartTime = runStartTime.getTime();
-                        displayEndTime = runEndTime.getTime();
-                        window.displayStartTime = displayStartTime;
-                        window.displayEndTime = displayEndTime;
-                        console.log(`Using run times for display range`);
+                // Initialize display range from actual depth data (not file timestamps)
+                // This gives us the real mission times, not idle data from the file
+                if (depthDataFull.length > 0) {
+                    const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
+                    // Use loop to avoid stack overflow with large arrays
+                    let minTime = Infinity;
+                    let maxTime = -Infinity;
+                    for (let i = 0; i < allTimes.length; i++) {
+                        if (allTimes[i] < minTime) minTime = allTimes[i];
+                        if (allTimes[i] > maxTime) maxTime = allTimes[i];
                     }
+                    displayStartTime = minTime;
+                    displayEndTime = maxTime;
+                    window.displayStartTime = displayStartTime;
+                    window.displayEndTime = displayEndTime;
+                    console.log(`Initialized display range from depth data: ${new Date(displayStartTime).toISOString()} to ${new Date(displayEndTime).toISOString()}`);
+                    
+                    // Update header with actual mission times
+                    const startDate = new Date(displayStartTime);
+                    const endDate = new Date(displayEndTime);
+                    const startStr = startDate.toLocaleString('fr-FR', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                    });
+                    const endStr = endDate.toLocaleString('fr-FR', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                    });
+                    const startEl = document.getElementById('actual-start-time');
+                    const endEl = document.getElementById('actual-end-time');
+                    if (startEl) startEl.textContent = startStr;
+                    if (endEl) endEl.textContent = endStr;
+                } else if (runStartTime && runEndTime) {
+                    // Fallback to run times if no depth data
+                    displayStartTime = runStartTime.getTime();
+                    displayEndTime = runEndTime.getTime();
+                    window.displayStartTime = displayStartTime;
+                    window.displayEndTime = displayEndTime;
+                    console.log(`Using run times for display range (no depth data)`);
                 }
                 
                 // Filter data based on display range
@@ -3166,6 +3471,118 @@
             drawSelectionBox(altitudeCtx, 'altitude', padding);
         }
         
+        function drawBatteryChart() {
+            if (!batteryCanvas || !batteryContainer || !batteryCtx) {
+                console.warn('Battery canvas, container, or ctx not available for drawBatteryChart');
+                return;
+            }
+            
+            const rect = batteryContainer.getBoundingClientRect();
+            
+            if (!batteryData || typeof batteryData !== 'object' || Object.keys(batteryData).length === 0) {
+                batteryCtx.clearRect(0, 0, batteryCanvas.width, batteryCanvas.height);
+                batteryCtx.fillStyle = '#666';
+                batteryCtx.font = '16px sans-serif';
+                batteryCtx.textAlign = 'center';
+                batteryCtx.fillText('Aucune donnée de batterie disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+            const chartWidth = rect.width - padding.left - padding.right;
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            if (chartWidth <= 0 || chartHeight <= 0) {
+                return;
+            }
+            
+            batteryCtx.clearRect(0, 0, batteryCanvas.width, batteryCanvas.height);
+            
+            if (displayStartTime === null || displayEndTime === null) {
+                batteryCtx.fillStyle = '#666';
+                batteryCtx.font = '16px sans-serif';
+                batteryCtx.textAlign = 'center';
+                batteryCtx.fillText('Aucune donnée de temps disponible', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            const minTime = displayStartTime;
+            const maxTime = displayEndTime;
+            const timeSpan = maxTime - minTime;
+            
+            // Draw state background zones
+            drawStateBackground(batteryCtx, padding, chartWidth, chartHeight, minTime, maxTime);
+            
+            // Collect all battery values (only from visible curves)
+            let allValues = [];
+            if (showBattCurrent && batteryData['BattCurrent'] && Array.isArray(batteryData['BattCurrent'])) {
+                allValues = allValues.concat(batteryData['BattCurrent'].map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            if (showBattLevel && batteryData['BattLevel'] && Array.isArray(batteryData['BattLevel'])) {
+                allValues = allValues.concat(batteryData['BattLevel'].map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            if (showBatVoltage && batteryData['BattVoltage'] && Array.isArray(batteryData['BattVoltage'])) {
+                allValues = allValues.concat(batteryData['BattVoltage'].map(d => d.value).filter(v => v !== null && v !== undefined));
+            }
+            
+            if (allValues.length === 0) {
+                batteryCtx.fillStyle = '#666';
+                batteryCtx.font = '16px sans-serif';
+                batteryCtx.textAlign = 'center';
+                batteryCtx.fillText('Aucune donnée de batterie dans la plage sélectionnée', rect.width / 2, rect.height / 2);
+                return;
+            }
+            
+            // Calculate value range - use stored range if available, otherwise calculate
+            let adjustedMinValue, adjustedMaxValue;
+            if (batteryYRange) {
+                adjustedMinValue = batteryYRange.min;
+                adjustedMaxValue = batteryYRange.max;
+            } else {
+                const { min: minValue, max: maxValue } = calculateMinMax(allValues);
+                adjustedMinValue = Math.floor(minValue);
+                adjustedMaxValue = Math.ceil(maxValue);
+            }
+            
+            // Draw axes using utility function
+            drawChartAxes(batteryCtx, padding, chartWidth, chartHeight);
+            
+            // Draw grid and Y axis labels using utility function
+            drawChartGrid(batteryCtx, padding, chartWidth, chartHeight, 8, adjustedMinValue, adjustedMaxValue,
+                (value) => value.toFixed(1));
+            
+            // Draw time labels using utility function
+            drawTimeLabels(batteryCtx, padding, chartWidth, chartHeight, minTime, maxTime, 8);
+            
+            // Battery colors
+            const batteryColors = {
+                'BattCurrent': '#007bff',
+                'BattLevel': '#28a745',
+                'BattVoltage': '#dc3545'
+            };
+            
+            // Draw battery curves using utility function
+            const batteryOrder = ['BattCurrent', 'BattLevel', 'BattVoltage'];
+            batteryOrder.forEach(battType => {
+                const shouldShow = 
+                    (battType === 'BattCurrent' && showBattCurrent) ||
+                    (battType === 'BattLevel' && showBattLevel) ||
+                    (battType === 'BattVoltage' && showBatVoltage);
+                
+                if (shouldShow && batteryData[battType] && batteryData[battType].length > 0) {
+                    const color = batteryColors[battType] || '#666';
+                    drawCurve(batteryCtx, batteryData[battType], padding, chartWidth, chartHeight,
+                        minTime, maxTime, adjustedMinValue, adjustedMaxValue, color, 2);
+                }
+            });
+            
+            // Draw selection box if dragging
+            drawSelectionBox(batteryCtx, 'battery', padding);
+            
+            // Update cursor line
+            updateCursorLine(batteryCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
+        }
+        
         // Helper function to get altitude visibility
         function getAltitudeVisibility(altType) {
             switch(altType) {
@@ -3174,6 +3591,15 @@
                 case 'Altitude OA': return showAltitudeOA;
                 case 'Altitude OA filt': return showAltitudeOAFilt;
                 case 'Target_altitude': return showTargetAltitude;
+                default: return false;
+            }
+        }
+        
+        function getBatteryVisibility(battType) {
+            switch(battType) {
+                case 'BattCurrent': return showBattCurrent;
+                case 'BattLevel': return showBattLevel;
+                case 'BattVoltage': return showBatVoltage;
                 default: return false;
             }
         }
@@ -3268,6 +3694,31 @@
                 }, 100);
             } catch (error) {
                 console.error('Error loading water temperature data:', error);
+            }
+        }
+        
+        // Load battery data
+        async function loadBatteryData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/battery`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                batteryDataFull = await response.json();
+                console.log('Loaded battery data (full):', Object.keys(batteryDataFull));
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log('Filtered battery data:', Object.keys(batteryData));
+                
+                // Ensure canvas is properly sized before drawing
+                resizeBatteryCanvas();
+                // Wait a bit for canvas to be ready
+                setTimeout(() => {
+                    drawBatteryChart();
+                }, 100);
+            } catch (error) {
+                console.error('Error loading battery data:', error);
             }
         }
         
@@ -4200,6 +4651,7 @@
                 case 'bearingPing': drawBearingPingChart(); break;
                 case 'orientation': drawOrientationChart(); break;
                 case 'waterTemp': drawWaterTempChart(); break;
+                case 'battery': drawBatteryChart(); break;
                 case 'usbl-azimuth-elevation': drawUSBLAzimuthElevationChart(); break;
                 case 'usbl-distance': drawUSBLDistanceChart(); break;
                 case 'usv-full-auv': drawUSVFullAuvChart(); break;
@@ -4216,6 +4668,7 @@
             drawBearingPingChart();
             drawOrientationChart();
             drawWaterTempChart();
+            drawBatteryChart();
             drawUSBLAzimuthElevationChart();
             drawUSBLDistanceChart();
             drawUSVFullAuvChart();
@@ -4346,6 +4799,7 @@
                 case 'bearingPing': bearingPingYRange = {min: minValue, max: maxValue}; break;
                 case 'orientation': orientationYRange = {min: minValue, max: maxValue}; break;
                 case 'waterTemp': waterTempYRange = {min: minValue, max: maxValue}; break;
+                case 'battery': batteryYRange = {min: minValue, max: maxValue}; break;
                 case 'usbl-azimuth-elevation': usblAzimuthElevationYRange = {min: minValue, max: maxValue}; break;
                 case 'usbl-distance': usblDistanceYRange = {min: minValue, max: maxValue}; break;
                 case 'usv-full-auv': usvFullAuvYRange = {min: minValue, max: maxValue}; break;
@@ -4395,6 +4849,7 @@
                         case 'bearingPing': bearingPingYRange = null; break;
                         case 'orientation': orientationYRange = null; break;
                         case 'waterTemp': waterTempYRange = null; break;
+                        case 'battery': batteryYRange = null; break;
                         case 'usbl-azimuth-elevation': usblAzimuthElevationYRange = null; break;
                         case 'usbl-distance': usblDistanceYRange = null; break;
                         case 'usv-full-auv': usvFullAuvYRange = null; break;
@@ -4483,6 +4938,7 @@
                 drawBearingPingChart();
                 drawOrientationChart();
                 drawWaterTempChart();
+                drawBatteryChart();
                 drawUSVFullAuvChart();
                 drawAltitudeChart();
                 
@@ -4500,6 +4956,7 @@
                         drawBearingPingChart();
                         drawOrientationChart();
                         drawWaterTempChart();
+                        drawBatteryChart();
                         drawUSVFullAuvChart();
                     }
                 }, 3000);
@@ -4559,6 +5016,7 @@
                     drawBearingPingChart();
                     drawOrientationChart();
                     drawWaterTempChart();
+                    drawBatteryChart();
                     drawUSVFullAuvChart();
                     updateMapTrajectory();
                     updateTimeRangeDisplay();
@@ -4581,9 +5039,11 @@
                     drawBearingPingChart();
                 drawOrientationChart();
                 drawWaterTempChart();
+                drawBatteryChart();
                 drawUSVFullAuvChart();
                 drawAltitudeChart();
                 updateMapMarker();
+                updateVideoThumbnail();
                 }
             }
         }
@@ -4609,6 +5069,7 @@
                 drawBearingPingChart();
                 drawOrientationChart();
                 drawWaterTempChart();
+                drawBatteryChart();
                 drawAltitudeChart();
                 if (usvMarker) {
                     usvMarker.remove();
@@ -4882,6 +5343,9 @@
             if (waterTempDataFull && Array.isArray(waterTempDataFull)) {
                 waterTempData = filterArrayByTimeRange(waterTempDataFull, displayStartTime, displayEndTime);
             }
+            
+            // Filter battery data
+            batteryData = filterObjectByTimeRange(batteryDataFull, displayStartTime, displayEndTime);
             
             // Filter USBL data
             if (usblBearingDataFull && Array.isArray(usblBearingDataFull)) {
@@ -5541,6 +6005,85 @@
             }
         }
         
+        // Video thumbnail management
+        let currentVideo = null;
+        
+        async function loadRunVideo() {
+            try {
+                const response = await fetch(`/api/run/${runId}/video`);
+                if (!response.ok) return null;
+                
+                const data = await response.json();
+                return data.video;
+            } catch (err) {
+                console.error('Error loading run video:', err);
+                return null;
+            }
+        }
+        
+        async function updateVideoThumbnail() {
+            if (selectedTime === null) {
+                document.getElementById('video-thumbnail').style.display = 'none';
+                document.getElementById('video-thumbnail-placeholder').style.display = 'block';
+                document.getElementById('video-time-difference').style.display = 'none';
+                return;
+            }
+            
+            // Load video if not already loaded
+            if (!currentVideo) {
+                currentVideo = await loadRunVideo();
+                if (!currentVideo) {
+                    document.getElementById('video-thumbnail-placeholder').textContent = 'Aucune vidéo associée à ce run';
+                    return;
+                }
+            }
+            
+            // Get thumbnail for selected time
+            try {
+                const timestamp = selectedTime.getTime();
+                const response = await fetch(`/api/videos/${currentVideo.id}/thumbnail?timestamp=${timestamp}`);
+                
+                if (!response.ok) {
+                    throw new Error('Thumbnail not found');
+                }
+                
+                const data = await response.json();
+                const thumbnailImg = document.getElementById('video-thumbnail');
+                const placeholder = document.getElementById('video-thumbnail-placeholder');
+                const timeDiff = document.getElementById('video-time-difference');
+                
+                thumbnailImg.src = data.thumbnail_path;
+                thumbnailImg.style.display = 'block';
+                placeholder.style.display = 'none';
+                
+                // Display time difference
+                const diffSeconds = data.time_difference;
+                let diffText = '';
+                if (Math.abs(diffSeconds) < 0.01) {
+                    diffText = 'Synchronisé';
+                } else if (diffSeconds > 0) {
+                    diffText = `+${diffSeconds.toFixed(2)}s (thumbnail en retard)`;
+                } else {
+                    diffText = `${diffSeconds.toFixed(2)}s (thumbnail en avance)`;
+                }
+                timeDiff.textContent = `Différence de temps: ${diffText}`;
+                timeDiff.style.display = 'block';
+            } catch (err) {
+                console.error('Error loading thumbnail:', err);
+                document.getElementById('video-thumbnail').style.display = 'none';
+                document.getElementById('video-thumbnail-placeholder').textContent = 'Thumbnail non disponible';
+                document.getElementById('video-time-difference').style.display = 'none';
+            }
+        }
+        
+        // Load video when page loads
+        loadRunVideo().then(video => {
+            currentVideo = video;
+            if (!video) {
+                document.getElementById('video-thumbnail-placeholder').textContent = 'Aucune vidéo associée à ce run';
+            }
+        });
+        
         // Helper function to get altitude visibility
         function getAltitudeVisibility(altType) {
             switch(altType) {
@@ -5735,6 +6278,31 @@
             });
         }
         
+        // Battery visibility event listeners
+        const showBattCurrentEl = document.getElementById('show-battcurrent');
+        if (showBattCurrentEl) {
+            showBattCurrentEl.addEventListener('change', (e) => {
+                showBattCurrent = e.target.checked;
+                drawBatteryChart();
+            });
+        }
+        
+        const showBattLevelEl = document.getElementById('show-battlevel');
+        if (showBattLevelEl) {
+            showBattLevelEl.addEventListener('change', (e) => {
+                showBattLevel = e.target.checked;
+                drawBatteryChart();
+            });
+        }
+        
+        const showBatVoltageEl = document.getElementById('show-batvoltage');
+        if (showBatVoltageEl) {
+            showBatVoltageEl.addEventListener('change', (e) => {
+                showBatVoltage = e.target.checked;
+                drawBatteryChart();
+            });
+        }
+        
         // USV Full AUV visibility event listeners
         const showUsvFullDistanceEl = document.getElementById('show-usv-full-distance');
         if (showUsvFullDistanceEl) {
@@ -5798,20 +6366,13 @@
             });
         }
         
-        // Initialize display range with run times immediately
-        if (runStartTime && runEndTime) {
-            displayStartTime = runStartTime.getTime();
-            displayEndTime = runEndTime.getTime();
-            window.displayStartTime = displayStartTime;
-            window.displayEndTime = displayEndTime;
-            updateTimeRangeDisplay();
-            updateStatistics();
-        }
+        // Don't initialize with run times - let loadDepthData() calculate from actual data
+        // This ensures we use the real mission times, not the file timestamps which may include idle data
         
         // Load all data (in sequence to ensure proper initialization)
         async function loadAllData() {
             console.log('loadAllData: Starting to load all data...');
-            await loadDepthData(); // This will initialize displayStartTime/displayEndTime if not set
+            await loadDepthData(); // This will initialize displayStartTime/displayEndTime from actual depth data
             console.log('loadAllData: Depth data loaded');
             await loadMotorData();
             console.log('loadAllData: Motor data loaded');
@@ -5824,6 +6385,8 @@
             console.log('loadAllData: About to call loadWaterTempData()...');
             await loadWaterTempData();
             console.log('loadAllData: Water temperature data loaded');
+            await loadBatteryData();
+            console.log('loadAllData: Battery data loaded');
             await loadAltitudeData();
             console.log('loadAllData: Altitude data loaded');
             await loadUSBLData();
@@ -5872,6 +6435,7 @@
                     drawBearingPingChart();
                     drawOrientationChart();
                     drawWaterTempChart();
+                    drawBatteryChart();
                     drawUSBLAzimuthElevationChart();
                     drawUSBLDistanceChart();
                     drawUSVFullAuvChart();
@@ -5883,7 +6447,467 @@
             }, 200);
         }
         
+        // ============================================
+        // FULLSCREEN FUNCTIONALITY
+        // ============================================
+        
+        let currentFullscreenPanel = null;
+        
+        // Mapping panel IDs to chart IDs (matching drawChartById cases)
+        const panelToChartId = {
+            'depth': 'depth',
+            'altitude': 'altitude',
+            'motors': 'motors',
+            'derived': 'derived',
+            'state': 'state',
+            'bearing-ping': 'bearingPing',
+            'orientation': 'orientation',
+            'water-temp': 'waterTemp',
+            'battery': 'battery',
+            'usbl-azimuth-elevation': 'usbl-azimuth-elevation',
+            'usbl-distance': 'usbl-distance',
+            'usv-full-auv': 'usv-full-auv'
+        };
+        
+        // Mapping panel IDs to resize functions
+        const panelToResizeFunction = {
+            'depth': resizeCanvas,
+            'altitude': resizeAltitudeCanvas,
+            'motors': resizeMotorsCanvas,
+            'derived': resizeDerivedCanvas,
+            'state': resizeStateCanvas,
+            'bearing-ping': resizeBearingPingCanvas,
+            'orientation': resizeOrientationCanvas,
+            'water-temp': resizeWaterTempCanvas,
+            'battery': resizeBatteryCanvas,
+            'usbl-azimuth-elevation': resizeUSBLAzimuthElevationCanvas,
+            'usbl-distance': resizeUSBLDistanceCanvas,
+            'usv-full-auv': resizeUSVFullAuvCanvas
+        };
+        
+        // Mapping panel IDs to canvas elements
+        const panelToCanvas = {
+            'depth': canvas,
+            'altitude': altitudeCanvas,
+            'motors': motorsCanvas,
+            'derived': derivedCanvas,
+            'state': stateCanvas,
+            'bearing-ping': bearingPingCanvas,
+            'orientation': orientationCanvas,
+            'water-temp': waterTempCanvas,
+            'usbl-azimuth-elevation': usblAzimuthElevationCanvas,
+            'usbl-distance': usblDistanceCanvas,
+            'usv-full-auv': usvFullAuvCanvas
+        };
+        
+        function toggleFullscreen(panelId) {
+            const panel = document.querySelector(`[data-panel-id="${panelId}"]`);
+            if (!panel) return;
+            
+            if (currentFullscreenPanel === panelId) {
+                exitFullscreen();
+            } else {
+                enterFullscreen(panelId);
+            }
+            
+            // Update button icon
+            updateFullscreenButton(panelId);
+        }
+        
+        function updateFullscreenButton(panelId) {
+            const panel = document.querySelector(`[data-panel-id="${panelId}"]`);
+            if (!panel) return;
+            
+            const button = panel.querySelector('.fullscreen-btn');
+            if (!button) return;
+            
+            if (currentFullscreenPanel === panelId) {
+                button.textContent = '⛶'; // Fullscreen icon
+                button.title = 'Quitter le plein écran';
+            } else {
+                button.textContent = '⛶'; // Fullscreen icon
+                button.title = 'Plein écran';
+            }
+        }
+        
+        function enterFullscreen(panelId) {
+            const panel = document.querySelector(`[data-panel-id="${panelId}"]`);
+            if (!panel) return;
+            
+            // Check if panel has a chart
+            const chartId = panelToChartId[panelId];
+            if (!chartId) return;
+            
+            panel.classList.add('fullscreen');
+            currentFullscreenPanel = panelId;
+            
+            // Update button
+            updateFullscreenButton(panelId);
+            
+            // Don't use browser fullscreen API to avoid black background
+            // Use CSS-only fullscreen with position: fixed instead
+            
+            // Resize canvas after entering fullscreen
+            setTimeout(() => {
+                const resizeFn = panelToResizeFunction[panelId];
+                if (resizeFn) {
+                    resizeFn();
+                }
+                
+                // Redraw the chart
+                drawChartById(chartId);
+                
+                // Update cursor line if selectedTime is set
+                if (selectedTime !== null) {
+                    drawAllCharts();
+                }
+            }, 100);
+        }
+        
+        function exitFullscreen() {
+            if (!currentFullscreenPanel) return;
+            
+            const panelId = currentFullscreenPanel;
+            
+            // No need to exit browser fullscreen API since we're not using it
+            
+            const panel = document.querySelector(`[data-panel-id="${panelId}"]`);
+            if (!panel) return;
+            
+            // Get the container before removing the class
+            const container = panel.querySelector('[id$="-chart-container"]');
+            
+            // Remove fullscreen class
+            panel.classList.remove('fullscreen');
+            
+            currentFullscreenPanel = null;
+            
+            // Update button
+            updateFullscreenButton(panelId);
+            
+            // Force container to reset its position and size
+            if (container) {
+                // Remove any inline styles that might have been set
+                container.style.position = '';
+                container.style.top = '';
+                container.style.left = '';
+                container.style.right = '';
+                container.style.bottom = '';
+                container.style.width = '';
+                container.style.height = '';
+            }
+            
+            // Reset canvas CSS styles to let it resize naturally
+            const canvasEl = panelToCanvas[panelId];
+            if (canvasEl) {
+                canvasEl.style.width = '';
+                canvasEl.style.height = '';
+            }
+            
+            // Force layout recalculation - wait for CSS to update
+            // Use multiple requestAnimationFrame to ensure layout is fully updated
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    // Force reflow by reading layout properties multiple times
+                    void panel.offsetHeight;
+                    if (container) {
+                        void container.offsetWidth;
+                        void container.offsetHeight;
+                        // Force another reflow
+                        const rect = container.getBoundingClientRect();
+                        console.log('Container size after exit fullscreen:', rect.width, rect.height);
+                    }
+                    
+                    // Wait a bit more to ensure CSS is fully applied
+                    setTimeout(() => {
+                        // Now resize canvas after layout is updated
+                        requestAnimationFrame(() => {
+                            const resizeFn = panelToResizeFunction[panelId];
+                            if (resizeFn) {
+                                resizeFn();
+                            }
+                            
+                            // Redraw all charts
+                            drawAllCharts();
+                        });
+                    }, 150);
+                });
+            });
+        }
+        
+        // Handle ESC key to exit fullscreen
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && currentFullscreenPanel) {
+                exitFullscreen();
+            }
+        });
+        
+        // Handle window resize for fullscreen panels
+        window.addEventListener('resize', () => {
+            if (currentFullscreenPanel) {
+                const panelId = currentFullscreenPanel;
+                const chartId = panelToChartId[panelId];
+                if (chartId) {
+                    setTimeout(() => {
+                        const resizeFn = panelToResizeFunction[panelId];
+                        if (resizeFn) {
+                            resizeFn();
+                        }
+                        drawChartById(chartId);
+                        if (selectedTime !== null) {
+                            drawAllCharts();
+                        }
+                    }, 100);
+                }
+            }
+        });
+        
+        // ============================================
+        // DRAG AND DROP FUNCTIONALITY
+        // ============================================
+        
+        let draggedPanel = null;
+        let draggedOverPanel = null;
+        
+        let dragMoveHandler = null;
+        let dragEndHandler = null;
+        
+        function initializeDragAndDrop() {
+            const dragHandles = document.querySelectorAll('.drag-handle');
+            
+            dragHandles.forEach(handle => {
+                // Prevent drag from interfering with canvas events
+                handle.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const panel = handle.closest('.panel');
+                    if (!panel) return;
+                    
+                    draggedPanel = panel;
+                    panel.classList.add('dragging');
+                    
+                    // Store initial position
+                    const startX = e.clientX;
+                    const startY = e.clientY;
+                    let hasMoved = false;
+                    
+                    // Create handlers
+                    dragMoveHandler = (moveEvent) => {
+                        const deltaX = Math.abs(moveEvent.clientX - startX);
+                        const deltaY = Math.abs(moveEvent.clientY - startY);
+                        
+                        // Only start dragging if mouse moved significantly
+                        if (deltaX > 5 || deltaY > 5) {
+                            hasMoved = true;
+                            handleDragMove(moveEvent);
+                        }
+                    };
+                    
+                    dragEndHandler = () => {
+                        if (hasMoved) {
+                            handleDragEnd();
+                        } else {
+                            // Just cleanup if no movement
+                            draggedPanel.classList.remove('dragging');
+                            draggedPanel = null;
+                        }
+                        
+                        // Clean up handlers
+                        document.removeEventListener('mousemove', dragMoveHandler);
+                        document.removeEventListener('mouseup', dragEndHandler);
+                        dragMoveHandler = null;
+                        dragEndHandler = null;
+                    };
+                    
+                    // Add mouse move and up listeners
+                    document.addEventListener('mousemove', dragMoveHandler);
+                    document.addEventListener('mouseup', dragEndHandler, { once: true });
+                });
+            });
+        }
+        
+        function handleDragMove(e) {
+            if (!draggedPanel) return;
+            
+            // Find the panel under the cursor (excluding canvas elements)
+            const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+            if (!elementBelow) {
+                // Clear drag-over if not over any element
+                document.querySelectorAll('.panel').forEach(p => {
+                    if (p !== draggedPanel) {
+                        p.classList.remove('drag-over');
+                    }
+                });
+                draggedOverPanel = null;
+                return;
+            }
+            
+            // Skip if over a canvas (to avoid interfering with chart interactions)
+            if (elementBelow.tagName === 'CANVAS' || elementBelow.closest('canvas')) {
+                return;
+            }
+            
+            const panelBelow = elementBelow.closest('.panel');
+            
+            // Update drag-over state
+            document.querySelectorAll('.panel').forEach(p => {
+                if (p !== draggedPanel) {
+                    p.classList.remove('drag-over');
+                }
+            });
+            
+            if (panelBelow && panelBelow !== draggedPanel) {
+                panelBelow.classList.add('drag-over');
+                draggedOverPanel = panelBelow;
+            } else {
+                draggedOverPanel = null;
+            }
+        }
+        
+        function handleDragEnd() {
+            if (!draggedPanel) return;
+            
+            // Remove drag-over classes
+            document.querySelectorAll('.panel').forEach(p => {
+                p.classList.remove('drag-over');
+            });
+            
+            // If we have a target panel, swap them
+            if (draggedOverPanel && draggedOverPanel !== draggedPanel) {
+                swapPanels(draggedPanel, draggedOverPanel);
+                // Save layout after swap
+                savePanelLayout();
+            }
+            
+            // Clean up
+            draggedPanel.classList.remove('dragging');
+            draggedPanel.style.cursor = '';
+            draggedPanel = null;
+            draggedOverPanel = null;
+        }
+        
+        function swapPanels(panel1, panel2) {
+            // Get the content container (common parent)
+            const content = document.querySelector('.content');
+            if (!content) return;
+            
+            // Get all panels in current order (including those in left-column)
+            const panels = Array.from(content.querySelectorAll('.panel'));
+            const index1 = panels.indexOf(panel1);
+            const index2 = panels.indexOf(panel2);
+            
+            if (index1 === -1 || index2 === -1) return;
+            
+            // Get the parent of each panel
+            const parent1 = panel1.parentNode;
+            const parent2 = panel2.parentNode;
+            
+            // Insert panel2 before panel1's next sibling (or at end)
+            const next1 = panel1.nextSibling;
+            if (next1) {
+                parent1.insertBefore(panel2, next1);
+            } else {
+                parent1.appendChild(panel2);
+            }
+            
+            // Insert panel1 before panel2's original position
+            const next2 = panel2.nextSibling === panel1 ? panel1.nextSibling : panel2.nextSibling;
+            if (next2 && next2 !== panel1) {
+                parent2.insertBefore(panel1, next2);
+            } else {
+                parent2.appendChild(panel1);
+            }
+        }
+        
+        // ============================================
+        // LAYOUT PERSISTENCE
+        // ============================================
+        
+        function savePanelLayout() {
+            const content = document.querySelector('.content');
+            if (!content) return;
+            
+            // Get all panels in their current DOM order (including those in left-column)
+            const panels = Array.from(content.querySelectorAll('.panel'));
+            const layout = panels.map(panel => panel.getAttribute('data-panel-id')).filter(id => id);
+            
+            const storageKey = `panelLayout_${runId}`;
+            localStorage.setItem(storageKey, JSON.stringify(layout));
+        }
+        
+        function loadPanelLayout() {
+            const storageKey = `panelLayout_${runId}`;
+            const savedLayout = localStorage.getItem(storageKey);
+            
+            if (!savedLayout) {
+                // Use default layout (current order)
+                return;
+            }
+            
+            try {
+                const layout = JSON.parse(savedLayout);
+                const content = document.querySelector('.content');
+                if (!content) return;
+                
+                // Create a map of existing panels
+                const panelMap = new Map();
+                document.querySelectorAll('.panel').forEach(panel => {
+                    panelMap.set(panel.getAttribute('data-panel-id'), panel);
+                });
+                
+                // Get the left-column if it exists
+                const leftColumn = content.querySelector('.left-column');
+                
+                // Reorder panels according to saved layout
+                layout.forEach(panelId => {
+                    const panel = panelMap.get(panelId);
+                    if (panel) {
+                        // Determine if panel should go in left-column or directly in content
+                        // For now, put all panels directly in content (left-column uses display: contents)
+                        const parent = panel.parentNode;
+                        if (parent === leftColumn || parent === content) {
+                            content.appendChild(panel);
+                        } else {
+                            // Panel is in a different container, move it
+                            content.appendChild(panel);
+                        }
+                    }
+                });
+                
+                // Add any panels not in the saved layout (new panels)
+                document.querySelectorAll('.panel').forEach(panel => {
+                    const panelId = panel.getAttribute('data-panel-id');
+                    if (!layout.includes(panelId)) {
+                        content.appendChild(panel);
+                    }
+                });
+            } catch (e) {
+                console.error('Error loading panel layout:', e);
+            }
+        }
+        
+        function resetPanelLayout() {
+            const storageKey = `panelLayout_${runId}`;
+            localStorage.removeItem(storageKey);
+            location.reload();
+        }
+        
+        // Initialize drag and drop
+        initializeDragAndDrop();
+        
+        // Load panel layout after all data is loaded
+        // This will be called after loadAllData() completes
+        function initializeLayoutAfterLoad() {
+            setTimeout(() => {
+                loadPanelLayout();
+            }, 300);
+        }
+        
         loadAllData();
+        
+        // Initialize layout after data is loaded
+        initializeLayoutAfterLoad();
     </script>
 </body>
 </html>

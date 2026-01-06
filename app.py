@@ -18,6 +18,11 @@ import json
 import time
 import math
 import pandas as pd
+import subprocess
+from datetime import datetime
+from dateutil import parser as date_parser
+import ffmpeg
+from PIL import Image
 
 load_dotenv()
 
@@ -42,6 +47,254 @@ def get_db_connection():
         user=db_user,
         password=os.getenv('DB_PASSWORD', '')
     )
+
+def extract_video_metadata(file_path):
+    """
+    Extract metadata from video file using ffprobe.
+    Returns dict with start_time (datetime), duration_seconds (float), and other metadata.
+    """
+    try:
+        # Use ffprobe to get video metadata
+        probe = ffmpeg.probe(file_path)
+        
+        # Get duration
+        duration_seconds = None
+        if 'format' in probe and 'duration' in probe['format']:
+            duration_seconds = float(probe['format']['duration'])
+        
+        # Try to get creation time from format tags
+        start_time = None
+        if 'format' in probe and 'tags' in probe['format']:
+            tags = probe['format']['tags']
+            # Try common date/time tags
+            for tag_name in ['creation_time', 'date', 'DATE', 'com.apple.quicktime.creationdate']:
+                if tag_name in tags:
+                    try:
+                        start_time = date_parser.parse(tags[tag_name])
+                        break
+                    except (ValueError, TypeError):
+                        continue
+        
+        # If no creation time found in format tags, try stream tags
+        if start_time is None and 'streams' in probe:
+            for stream in probe['streams']:
+                if 'tags' in stream:
+                    tags = stream['tags']
+                    for tag_name in ['creation_time', 'date', 'DATE', 'com.apple.quicktime.creationdate']:
+                        if tag_name in tags:
+                            try:
+                                start_time = date_parser.parse(tags[tag_name])
+                                break
+                            except (ValueError, TypeError):
+                                continue
+                if start_time is not None:
+                    break
+        
+        return {
+            'start_time': start_time,
+            'duration_seconds': duration_seconds,
+            'format': probe.get('format', {}).get('format_name', 'unknown'),
+            'width': None,
+            'height': None
+        }
+    except Exception as e:
+        print(f"Error extracting video metadata from {file_path}: {str(e)}")
+        return {
+            'start_time': None,
+            'duration_seconds': None,
+            'format': 'unknown',
+            'width': None,
+            'height': None,
+            'error': str(e)
+        }
+
+def extract_video_thumbnails(video_id, file_path):
+    """
+    Extract thumbnails from video file every 0.5 seconds.
+    Runs in a background thread.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    error_message = None
+    
+    try:
+        # Check if ffmpeg is available
+        try:
+            import subprocess
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
+            if result.returncode != 0:
+                raise Exception("ffmpeg command failed")
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as e:
+            error_message = f"ffmpeg not found or not working: {str(e)}. Please install ffmpeg."
+            raise Exception(error_message)
+        
+        # Check if video file exists
+        if not Path(file_path).exists():
+            error_message = f"Video file not found: {file_path}"
+            raise FileNotFoundError(error_message)
+        
+        # Update status to processing
+        cursor.execute("""
+            UPDATE videos 
+            SET thumbnail_status = 'processing' 
+            WHERE id = %s
+        """, (video_id,))
+        conn.commit()
+        
+        # Get video duration
+        cursor.execute("SELECT duration_seconds FROM videos WHERE id = %s", (video_id,))
+        result = cursor.fetchone()
+        if not result or not result[0]:
+            error_message = "Video duration not found in database"
+            raise ValueError(error_message)
+        
+        duration_seconds = float(result[0])
+        if duration_seconds <= 0:
+            error_message = f"Invalid video duration: {duration_seconds}"
+            raise ValueError(error_message)
+        
+        # Create thumbnails directory
+        thumbnails_dir = Path('static/videos/thumbnails') / str(video_id)
+        thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract thumbnails every 0.5 seconds
+        thumbnail_interval = 0.5
+        current_time = 0.0
+        thumbnail_count = 0
+        errors = []
+        thumbnail_batch = []  # Batch insert for better performance
+        
+        while current_time < duration_seconds:
+            # Output filename
+            output_file = thumbnails_dir / f"{current_time:.2f}.jpg"
+            
+            try:
+                # Use ffmpeg to extract frame at specific time with VGA max resize
+                # Scale filter: min(640,iw):min(480,ih) preserves aspect ratio, max VGA
+                cmd = [
+                    'ffmpeg',
+                    '-i', str(file_path),
+                    '-ss', str(current_time),
+                    '-vframes', '1',
+                    '-vf', "scale='min(640,iw)':'min(480,ih)':force_original_aspect_ratio=decrease",
+                    '-q:v', '5',  # Quality 5 for good size/quality balance
+                    '-y',  # Overwrite output file
+                    str(output_file)
+                ]
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode == 0 and output_file.exists():
+                    # Get thumbnail metadata
+                    try:
+                        with Image.open(output_file) as img:
+                            width, height = img.size
+                        file_size = output_file.stat().st_size
+                        
+                        # Prepare for batch insert
+                        relative_path = f'/static/videos/thumbnails/{video_id}/{current_time:.2f}.jpg'
+                        thumbnail_batch.append((
+                            video_id,
+                            current_time,
+                            relative_path,
+                            file_size,
+                            width,
+                            height
+                        ))
+                        
+                        thumbnail_count += 1
+                    except Exception as img_error:
+                        errors.append(f"Time {current_time:.2f}s: Error reading image metadata: {str(img_error)[:200]}")
+                else:
+                    error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                    errors.append(f"Time {current_time:.2f}s: {error_msg}")
+                    
+            except subprocess.TimeoutExpired:
+                errors.append(f"Time {current_time:.2f}s: Timeout")
+            except Exception as e:
+                errors.append(f"Time {current_time:.2f}s: {str(e)[:200]}")
+            
+            current_time += thumbnail_interval
+            
+            # Batch insert every 100 thumbnails for better performance
+            if len(thumbnail_batch) >= 100:
+                try:
+                    from psycopg2.extras import execute_values
+                    execute_values(
+                        cursor,
+                        """
+                        INSERT INTO video_thumbnails 
+                        (video_id, time_offset, file_path, file_size_bytes, width, height)
+                        VALUES %s
+                        ON CONFLICT (video_id, time_offset) DO NOTHING
+                        """,
+                        thumbnail_batch
+                    )
+                    conn.commit()
+                    thumbnail_batch = []
+                except Exception as batch_error:
+                    print(f"Error in batch insert: {batch_error}")
+                    errors.append(f"Batch insert error: {str(batch_error)[:200]}")
+        
+        # Insert remaining thumbnails in batch
+        if thumbnail_batch:
+            try:
+                from psycopg2.extras import execute_values
+                execute_values(
+                    cursor,
+                    """
+                    INSERT INTO video_thumbnails 
+                    (video_id, time_offset, file_path, file_size_bytes, width, height)
+                    VALUES %s
+                    ON CONFLICT (video_id, time_offset) DO NOTHING
+                    """,
+                    thumbnail_batch
+                )
+                conn.commit()
+            except Exception as batch_error:
+                print(f"Error in final batch insert: {batch_error}")
+                errors.append(f"Final batch insert error: {str(batch_error)[:200]}")
+        
+        if thumbnail_count == 0:
+            error_message = f"Failed to extract any thumbnails. Errors: {'; '.join(errors[:5])}"
+            raise Exception(error_message)
+        
+        # Update status to completed
+        cursor.execute("""
+            UPDATE videos 
+            SET thumbnail_status = 'completed' 
+            WHERE id = %s
+        """, (video_id,))
+        conn.commit()
+        
+        print(f"✓ Extracted {thumbnail_count} thumbnails for video {video_id} (indexed in database)")
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        error_message = error_message or str(e)
+        print(f"Error extracting thumbnails for video {video_id}: {error_message}")
+        print(f"Details: {error_details}")
+        
+        # Update status to failed with error message
+        try:
+            # Note: We'd need to add an error_message column to videos table to store this
+            cursor.execute("""
+                UPDATE videos 
+                SET thumbnail_status = 'failed' 
+                WHERE id = %s
+            """, (video_id,))
+            conn.commit()
+        except Exception as update_error:
+            print(f"Error updating status: {update_error}")
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.route('/')
 def index():
@@ -402,6 +655,63 @@ def get_run_depth():
         cursor.close()
         conn.close()
 
+@app.route('/api/videos_for_runs')
+def get_videos_for_runs():
+    """API endpoint to get videos for runs chart display."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        start_time = request.args.get('start_time', '')
+        end_time = request.args.get('end_time', '')
+        
+        query = """
+            SELECT 
+                id,
+                camera_id,
+                effective_start_time,
+                duration_seconds,
+                filename
+            FROM videos
+            WHERE effective_start_time IS NOT NULL
+              AND duration_seconds IS NOT NULL
+              AND camera_id IS NOT NULL
+        """
+        params = []
+        
+        if start_time:
+            query += " AND (effective_start_time + (duration_seconds || ' seconds')::INTERVAL) >= %s"
+            params.append(start_time)
+        
+        if end_time:
+            query += " AND effective_start_time <= %s"
+            params.append(end_time)
+        
+        query += " ORDER BY camera_id, effective_start_time"
+        
+        cursor.execute(query, params)
+        videos = cursor.fetchall()
+        
+        result = []
+        for video in videos:
+            effective_start = pd.Timestamp(video['effective_start_time'])
+            effective_end = effective_start + pd.Timedelta(seconds=float(video['duration_seconds']))
+            
+            result.append({
+                'id': video['id'],
+                'camera_id': video['camera_id'],
+                'start_time': effective_start.isoformat(),
+                'end_time': effective_end.isoformat(),
+                'duration_seconds': float(video['duration_seconds']),
+                'filename': video['filename']
+            })
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.route('/api/run/<int:run_id>/depth')
 def get_run_depth_by_id(run_id):
     """API endpoint to get depth data for a specific AUV run."""
@@ -473,6 +783,51 @@ def get_run_altitude(run_id):
             entry = {
                 'time': row['time'].isoformat() if row['time'] else None,
                 'value': row['altitude']  # Use 'value' for consistency with other endpoints
+            }
+            result[data_type].append(entry)
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/battery')
+def get_run_battery(run_id):
+    """API endpoint to get battery data (battcurrent, battlevel, batVoltage) for a specific AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Get all battery data types for this run
+        battery_types = ['BattCurrent', 'BattLevel', 'BattVoltage']
+        
+        # Build query to get all battery data
+        placeholders = ','.join(['%s'] * len(battery_types))
+        query = f"""
+            SELECT 
+                le.time,
+                dtc.data_type,
+                le.value as battery_value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.log_file_id = %s
+              AND dtc.data_type IN ({placeholders})
+            ORDER BY le.time ASC, dtc.data_type ASC
+        """
+        cursor.execute(query, [run_id] + battery_types)
+        battery_data = cursor.fetchall()
+        
+        # Group by data type
+        result = {}
+        for row in battery_data:
+            data_type = row['data_type']
+            if data_type not in result:
+                result[data_type] = []
+            
+            entry = {
+                'time': row['time'].isoformat() if row['time'] else None,
+                'value': row['battery_value']
             }
             result[data_type].append(entry)
         
@@ -882,11 +1237,42 @@ def get_runs():
         runs_list = []
         for run in runs:
             run_dict = dict(run)
-            # Convert timestamps to ISO format
-            if run_dict['first_timestamp']:
-                run_dict['first_timestamp'] = run_dict['first_timestamp'].isoformat()
-            if run_dict['last_timestamp']:
-                run_dict['last_timestamp'] = run_dict['last_timestamp'].isoformat()
+            
+            # For AUV runs, calculate actual mission times from depth data
+            if run_dict['vehicle_type'] == 'AUV' and run_dict['id']:
+                # Get actual mission start/end from depth data
+                depth_query = """
+                    SELECT 
+                        MIN(le.time) as actual_start,
+                        MAX(le.time) as actual_end
+                    FROM log_entries le
+                    JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+                    WHERE le.log_file_id = %s
+                      AND dtc.data_type = 'Depth'
+                """
+                cursor.execute(depth_query, (run_dict['id'],))
+                depth_result = cursor.fetchone()
+                
+                if depth_result and depth_result['actual_start'] and depth_result['actual_end']:
+                    # Use actual mission times from depth data
+                    run_dict['first_timestamp'] = depth_result['actual_start'].isoformat()
+                    run_dict['last_timestamp'] = depth_result['actual_end'].isoformat()
+                    # Recalculate duration
+                    duration = (depth_result['actual_end'] - depth_result['actual_start']).total_seconds()
+                    run_dict['duration_seconds'] = duration
+                else:
+                    # Fallback to file timestamps if no depth data
+                    if run_dict['first_timestamp']:
+                        run_dict['first_timestamp'] = run_dict['first_timestamp'].isoformat()
+                    if run_dict['last_timestamp']:
+                        run_dict['last_timestamp'] = run_dict['last_timestamp'].isoformat()
+            else:
+                # For non-AUV runs, use file timestamps
+                if run_dict['first_timestamp']:
+                    run_dict['first_timestamp'] = run_dict['first_timestamp'].isoformat()
+                if run_dict['last_timestamp']:
+                    run_dict['last_timestamp'] = run_dict['last_timestamp'].isoformat()
+            
             runs_list.append(run_dict)
         
         return jsonify(runs_list)
@@ -3857,6 +4243,500 @@ def get_run_auv_calculated_position(run_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
         
+    finally:
+        cursor.close()
+        conn.close()
+
+def associate_video_to_run(video_id, effective_start_time, duration_seconds):
+    """
+    Automatically associate a video to a run if their time ranges overlap.
+    """
+    if not effective_start_time or not duration_seconds:
+        return None
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Convert to datetime if needed
+        if isinstance(effective_start_time, str):
+            effective_start_time = pd.Timestamp(effective_start_time)
+        elif not isinstance(effective_start_time, pd.Timestamp):
+            effective_start_time = pd.Timestamp(effective_start_time)
+        
+        effective_end_time = effective_start_time + pd.Timedelta(seconds=duration_seconds)
+        
+        # Find runs that overlap with video time range
+        query = """
+            SELECT id, first_timestamp, last_timestamp
+            FROM log_files
+            WHERE vehicle_type = 'AUV'
+              AND first_timestamp IS NOT NULL
+              AND last_timestamp IS NOT NULL
+              AND (
+                  (first_timestamp <= %s AND last_timestamp >= %s) OR
+                  (first_timestamp <= %s AND last_timestamp >= %s) OR
+                  (first_timestamp >= %s AND last_timestamp <= %s)
+              )
+            ORDER BY first_timestamp
+            LIMIT 1
+        """
+        cursor.execute(query, (
+            effective_start_time, effective_start_time,
+            effective_end_time, effective_end_time,
+            effective_start_time, effective_end_time
+        ))
+        result = cursor.fetchone()
+        
+        if result:
+            run_id = result[0]
+            cursor.execute("""
+                UPDATE videos 
+                SET run_id = %s 
+                WHERE id = %s
+            """, (run_id, video_id))
+            conn.commit()
+            return run_id
+        
+        return None
+    except Exception as e:
+        print(f"Error associating video {video_id} to run: {str(e)}")
+        return None
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/videos/upload', methods=['POST'])
+def upload_videos():
+    """API endpoint to upload video files."""
+    try:
+        if 'files' not in request.files:
+            return jsonify({'status': 'error', 'message': 'Aucun fichier fourni'}), 400
+        
+        files = request.files.getlist('files')
+        if not files or all(f.filename == '' for f in files):
+            return jsonify({'status': 'error', 'message': 'Aucun fichier sélectionné'}), 400
+        
+        # Filter video files
+        video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.m4v']
+        video_files = [f for f in files if any(f.filename.lower().endswith(ext) for ext in video_extensions)]
+        
+        if not video_files:
+            return jsonify({'status': 'error', 'message': 'Aucun fichier vidéo trouvé'}), 400
+        
+        # Create videos directory
+        videos_dir = Path('static/videos')
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        uploaded_videos = []
+        
+        try:
+            for file in video_files:
+                # Save file
+                filename = file.filename
+                file_path = videos_dir / filename
+                file.save(str(file_path))
+                
+                # Extract metadata
+                metadata = extract_video_metadata(str(file_path))
+                
+                # Insert into database
+                cursor.execute("""
+                    INSERT INTO videos (filename, file_path, start_time, duration_seconds, thumbnail_status)
+                    VALUES (%s, %s, %s, %s, 'pending')
+                    RETURNING id, effective_start_time
+                """, (
+                    filename,
+                    str(file_path),
+                    metadata['start_time'],
+                    metadata['duration_seconds']
+                ))
+                result = cursor.fetchone()
+                video_id = result['id']
+                effective_start_time = result['effective_start_time']
+                
+                # Associate to run if possible
+                if effective_start_time and metadata['duration_seconds']:
+                    run_id = associate_video_to_run(video_id, effective_start_time, metadata['duration_seconds'])
+                else:
+                    run_id = None
+                
+                # Start thumbnail extraction in background thread
+                thread = threading.Thread(
+                    target=extract_video_thumbnails,
+                    args=(video_id, str(file_path))
+                )
+                thread.daemon = True
+                thread.start()
+                
+                uploaded_videos.append({
+                    'id': video_id,
+                    'filename': filename,
+                    'start_time': metadata['start_time'].isoformat() if metadata['start_time'] else None,
+                    'duration_seconds': metadata['duration_seconds'],
+                    'time_offset_seconds': 0.0,
+                    'effective_start_time': effective_start_time.isoformat() if effective_start_time else None,
+                    'thumbnail_status': 'pending',
+                    'run_id': run_id,
+                    'camera_id': None
+                })
+            
+            conn.commit()
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'{len(uploaded_videos)} vidéo(s) uploadée(s)',
+                'videos': uploaded_videos
+            })
+            
+        except Exception as e:
+            conn.rollback()
+            import traceback
+            traceback.print_exc()
+            return jsonify({'status': 'error', 'message': f'Erreur lors de l\'upload: {str(e)}'}), 500
+        finally:
+            cursor.close()
+            conn.close()
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'message': f'Erreur: {str(e)}'}), 500
+
+@app.route('/api/videos', methods=['GET'])
+def get_videos():
+    """API endpoint to get all videos."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Check if table exists first
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'videos'
+            ) as exists
+        """)
+        result = cursor.fetchone()
+        table_exists = result['exists'] if result else False
+        
+        if not table_exists:
+            return jsonify({
+                'error': 'Videos table does not exist. Please run: python3 database/setup.py'
+            }), 500
+        
+        cursor.execute("""
+            SELECT 
+                id,
+                filename,
+                file_path,
+                start_time,
+                time_offset_seconds,
+                effective_start_time,
+                duration_seconds,
+                thumbnail_status,
+                run_id,
+                camera_id,
+                created_at
+            FROM videos
+            ORDER BY created_at DESC
+        """)
+        videos = cursor.fetchall()
+        
+        result = []
+        for video in videos:
+            result.append({
+                'id': video['id'],
+                'filename': video['filename'],
+                'start_time': video['start_time'].isoformat() if video['start_time'] else None,
+                'time_offset_seconds': float(video['time_offset_seconds']) if video['time_offset_seconds'] else 0.0,
+                'effective_start_time': video['effective_start_time'].isoformat() if video['effective_start_time'] else None,
+                'duration_seconds': float(video['duration_seconds']) if video['duration_seconds'] else None,
+                'thumbnail_status': video['thumbnail_status'],
+                'run_id': video['run_id'],
+                'camera_id': video['camera_id'],
+                'created_at': video['created_at'].isoformat() if video['created_at'] else None
+            })
+        
+        return jsonify(result)
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/videos/<int:video_id>/offset', methods=['PUT'])
+def update_video_offset(video_id):
+    """API endpoint to update video time offset."""
+    data = request.get_json()
+    if 'time_offset_seconds' not in data:
+        return jsonify({'error': 'time_offset_seconds is required'}), 400
+    
+    try:
+        offset = float(data['time_offset_seconds'])
+    except (ValueError, TypeError):
+        return jsonify({'error': 'time_offset_seconds must be a number'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Update offset (trigger will update effective_start_time)
+        cursor.execute("""
+            UPDATE videos 
+            SET time_offset_seconds = %s
+            WHERE id = %s
+            RETURNING id, effective_start_time, duration_seconds
+        """, (offset, video_id))
+        
+        result = cursor.fetchone()
+        if not result:
+            return jsonify({'error': 'Video not found'}), 404
+        
+        effective_start_time = result['effective_start_time']
+        duration_seconds = result['duration_seconds']
+        
+        # Reassociate to run if needed
+        if effective_start_time and duration_seconds:
+            associate_video_to_run(video_id, effective_start_time, duration_seconds)
+        
+        conn.commit()
+        
+        # Get updated video data
+        cursor.execute("""
+            SELECT 
+                id,
+                filename,
+                start_time,
+                time_offset_seconds,
+                effective_start_time,
+                duration_seconds,
+                thumbnail_status,
+                run_id
+            FROM videos
+            WHERE id = %s
+        """, (video_id,))
+        video = cursor.fetchone()
+        
+        return jsonify({
+            'id': video['id'],
+            'filename': video['filename'],
+            'start_time': video['start_time'].isoformat() if video['start_time'] else None,
+            'time_offset_seconds': float(video['time_offset_seconds']) if video['time_offset_seconds'] else 0.0,
+            'effective_start_time': video['effective_start_time'].isoformat() if video['effective_start_time'] else None,
+            'duration_seconds': float(video['duration_seconds']) if video['duration_seconds'] else None,
+            'thumbnail_status': video['thumbnail_status'],
+            'run_id': video['run_id'],
+            'camera_id': video['camera_id']
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/videos/<int:video_id>/camera', methods=['PUT'])
+def update_video_camera(video_id):
+    """API endpoint to update video camera_id."""
+    data = request.get_json()
+    if 'camera_id' not in data:
+        return jsonify({'error': 'camera_id is required'}), 400
+    
+    try:
+        camera_id = int(data['camera_id']) if data['camera_id'] is not None and data['camera_id'] != '' else None
+    except (ValueError, TypeError):
+        return jsonify({'error': 'camera_id must be a number or null'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        cursor.execute("""
+            UPDATE videos 
+            SET camera_id = %s
+            WHERE id = %s
+            RETURNING id, camera_id
+        """, (camera_id, video_id))
+        
+        result = cursor.fetchone()
+        if not result:
+            return jsonify({'error': 'Video not found'}), 404
+        
+        conn.commit()
+        
+        return jsonify({
+            'id': result['id'],
+            'camera_id': result['camera_id']
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/videos/<int:video_id>/thumbnail', methods=['GET'])
+def get_video_thumbnail(video_id):
+    """API endpoint to get thumbnail closest to a timestamp."""
+    timestamp_str = request.args.get('timestamp')
+    if not timestamp_str:
+        return jsonify({'error': 'timestamp parameter is required'}), 400
+    
+    try:
+        # Timestamp can be in milliseconds (from JavaScript) or ISO format
+        if timestamp_str.isdigit():
+            # Assume milliseconds
+            timestamp_ms = int(timestamp_str)
+            target_time = pd.Timestamp(datetime.fromtimestamp(timestamp_ms / 1000.0))
+        else:
+            # Try to parse as ISO format
+            target_time = pd.Timestamp(timestamp_str)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid timestamp format'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Get video info
+        cursor.execute("""
+            SELECT effective_start_time, duration_seconds
+            FROM videos
+            WHERE id = %s
+        """, (video_id,))
+        video = cursor.fetchone()
+        
+        if not video or not video['effective_start_time'] or not video['duration_seconds']:
+            return jsonify({'error': 'Video not found or missing metadata'}), 404
+        
+        # Calculate relative time in video
+        effective_start = pd.Timestamp(video['effective_start_time'])
+        relative_time = (target_time - effective_start).total_seconds()
+        
+        if relative_time < 0 or relative_time > video['duration_seconds']:
+            return jsonify({'error': 'Timestamp outside video range'}), 404
+        
+        # Find closest thumbnail using database query (optimized with index)
+        # Round to nearest 0.5s interval
+        target_offset = round(relative_time * 2) / 2.0
+        
+        # Query for exact match first, then closest if not found
+        cursor.execute("""
+            SELECT time_offset, file_path
+            FROM video_thumbnails
+            WHERE video_id = %s
+              AND time_offset = %s
+            LIMIT 1
+        """, (video_id, target_offset))
+        
+        thumbnail = cursor.fetchone()
+        
+        # If exact match not found, find closest thumbnail
+        if not thumbnail:
+            cursor.execute("""
+                SELECT time_offset, file_path
+                FROM video_thumbnails
+                WHERE video_id = %s
+                  AND time_offset >= %s
+                ORDER BY time_offset ASC
+                LIMIT 1
+            """, (video_id, target_offset))
+            
+            thumbnail_after = cursor.fetchone()
+            
+            cursor.execute("""
+                SELECT time_offset, file_path
+                FROM video_thumbnails
+                WHERE video_id = %s
+                  AND time_offset <= %s
+                ORDER BY time_offset DESC
+                LIMIT 1
+            """, (video_id, target_offset))
+            
+            thumbnail_before = cursor.fetchone()
+            
+            # Choose closest thumbnail
+            if thumbnail_after and thumbnail_before:
+                diff_after = abs(thumbnail_after['time_offset'] - target_offset)
+                diff_before = abs(thumbnail_before['time_offset'] - target_offset)
+                thumbnail = thumbnail_after if diff_after < diff_before else thumbnail_before
+            elif thumbnail_after:
+                thumbnail = thumbnail_after
+            elif thumbnail_before:
+                thumbnail = thumbnail_before
+        
+        if not thumbnail:
+            return jsonify({'error': 'Thumbnail not found'}), 404
+        
+        thumbnail_time = float(thumbnail['time_offset'])
+        thumbnail_path = thumbnail['file_path']
+        
+        # Return relative path for serving
+        return jsonify({
+            'thumbnail_path': thumbnail_path,
+            'thumbnail_time': thumbnail_time,
+            'target_time': relative_time,
+            'time_difference': relative_time - thumbnail_time
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/video', methods=['GET'])
+def get_run_video(run_id):
+    """API endpoint to get video associated with a run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Get run time range
+        cursor.execute("""
+            SELECT first_timestamp, last_timestamp
+            FROM log_files
+            WHERE id = %s AND vehicle_type = 'AUV'
+        """, (run_id,))
+        run = cursor.fetchone()
+        
+        if not run:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        if not run['first_timestamp'] or not run['last_timestamp']:
+            return jsonify({'video': None})
+        
+        # Find video that overlaps with run
+        cursor.execute("""
+            SELECT 
+                id,
+                filename,
+                start_time,
+                time_offset_seconds,
+                effective_start_time,
+                duration_seconds,
+                thumbnail_status
+            FROM videos
+            WHERE run_id = %s
+               OR (
+                   effective_start_time IS NOT NULL
+                   AND duration_seconds IS NOT NULL
+                   AND effective_start_time <= %s
+                   AND (effective_start_time + (duration_seconds || ' seconds')::INTERVAL) >= %s
+               )
+            ORDER BY effective_start_time
+            LIMIT 1
+        """, (run_id, run['last_timestamp'], run['first_timestamp']))
+        
+        video = cursor.fetchone()
+        
+        if not video:
+            return jsonify({'video': None})
+        
+        return jsonify({
+            'video': {
+                'id': video['id'],
+                'filename': video['filename'],
+                'start_time': video['start_time'].isoformat() if video['start_time'] else None,
+                'time_offset_seconds': float(video['time_offset_seconds']) if video['time_offset_seconds'] else 0.0,
+                'effective_start_time': video['effective_start_time'].isoformat() if video['effective_start_time'] else None,
+                'duration_seconds': float(video['duration_seconds']) if video['duration_seconds'] else None,
+                'thumbnail_status': video['thumbnail_status']
+            }
+        })
     finally:
         cursor.close()
         conn.close()
