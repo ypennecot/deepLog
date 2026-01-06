@@ -13,8 +13,20 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import json
+import ast
 import time
-from decode_usbl import decode_usbl_message, convert_kogger_state_to_seaker
+try:
+    # Try relative import first (when used as part of database package)
+    from .decode_usbl import decode_usbl_message, convert_kogger_state_to_seaker
+except ImportError:
+    # Fall back to absolute import (when database is in sys.path)
+    from decode_usbl import decode_usbl_message, convert_kogger_state_to_seaker
+from antenna_driver_analysis.kogger_usbl_decoder import (
+    decode_usbl_message_from_csv,
+    parse_bytes_from_string,
+    reassemble_received_messages,
+    parse_message
+)
 
 load_dotenv()
 
@@ -100,14 +112,30 @@ def import_navigation_file(file_path, conn, file_progress=None):
     try:
         # Check if file already exists
         cursor.execute("""
-            SELECT id FROM log_files 
+            SELECT id, import_status FROM log_files 
             WHERE filename = %s AND vehicle_type = %s AND vehicle_id = %s
             LIMIT 1
         """, (filename, vehicle_type, vehicle_id))
         existing = cursor.fetchone()
         if existing:
-            print(f"⚠️  File {filename} already imported, skipping")
-            return False
+            # Get full status info
+            cursor.execute("""
+                SELECT id, import_status, row_count, first_timestamp, last_timestamp, error_message
+                FROM log_files 
+                WHERE id = %s
+            """, (existing[0],))
+            status_info = cursor.fetchone()
+            
+            # If import failed, allow re-import by deleting the failed entry
+            if status_info[1] == 'failed':
+                print(f"⚠️  File {filename} previously failed, deleting and re-importing...")
+                # Delete the failed entry and its associated log_entries
+                cursor.execute("DELETE FROM log_entries WHERE log_file_id = %s", (existing[0],))
+                cursor.execute("DELETE FROM log_files WHERE id = %s", (existing[0],))
+                conn.commit()
+            else:
+                print(f"⚠️  File {filename} already imported, skipping")
+                return False
         
         # Create log_file entry
         file_size = os.path.getsize(file_path)
@@ -144,16 +172,31 @@ def import_navigation_file(file_path, conn, file_progress=None):
         
         # Try to read CSV, handle errors gracefully
         # Try different encodings if UTF-8 fails
+        # latin-1 can read any byte (1:1 mapping), so it will always work
         csv_reader = None
-        encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+        encodings = ['utf-8', 'iso-8859-1', 'cp1252', 'latin-1']
         
         for encoding in encodings:
             try:
+                # Try to create the reader and test reading first chunk
+                # pandas reads lazily, so we need to test actual reading
                 csv_reader = pd.read_csv(file_path, chunksize=chunk_size, on_bad_lines='skip', 
                                         engine='python', encoding=encoding)
-                if encoding != 'utf-8':
-                    print(f"  ⚠️  Using {encoding} encoding (UTF-8 failed)")
-                break
+                # Test if we can actually read the first chunk (pandas reads lazily)
+                # This will catch encoding errors that occur during actual reading
+                try:
+                    first_chunk = next(iter(csv_reader))
+                    # Reset the reader by creating a new one since we consumed the first chunk
+                    csv_reader = pd.read_csv(file_path, chunksize=chunk_size, on_bad_lines='skip', 
+                                            engine='python', encoding=encoding)
+                    if encoding != 'utf-8':
+                        print(f"  ⚠️  Using {encoding} encoding (UTF-8 failed)")
+                    break
+                except (UnicodeDecodeError, Exception) as e2:
+                    # First chunk read failed, try next encoding
+                    if encoding == encodings[-1]:  # Last encoding failed (should be latin-1 which always works)
+                        raise e2
+                    continue
             except (UnicodeDecodeError, Exception) as e:
                 if encoding == encodings[-1]:  # Last encoding failed
                     raise e
@@ -318,12 +361,13 @@ def import_navigation_file(file_path, conn, file_progress=None):
         
     except Exception as e:
         conn.rollback()
-        cursor.execute("""
-            UPDATE log_files
-            SET import_status = 'failed', error_message = %s
-            WHERE id = %s
-        """, (str(e), log_file_id))
-        conn.commit()
+        if log_file_id:
+            cursor.execute("""
+                UPDATE log_files
+                SET import_status = 'failed', error_message = %s
+                WHERE id = %s
+            """, (str(e), log_file_id))
+            conn.commit()
         print(f"❌ Error importing {filename}: {e}")
         return False
     finally:
@@ -358,7 +402,7 @@ def import_usbl_file(file_path, conn, file_progress=None):
     try:
         # Check if file already exists
         cursor.execute("""
-            SELECT id FROM log_files 
+            SELECT id, import_status FROM log_files 
             WHERE filename = %s AND vehicle_type = %s AND vehicle_id = %s
             LIMIT 1
         """, (filename, vehicle_type, vehicle_id))
@@ -406,6 +450,16 @@ def import_usbl_file(file_path, conn, file_progress=None):
         first_timestamp = None
         last_timestamp = None
         
+        # Buffer for reassembling RECEIVED messages
+        received_buffer = b''
+        last_direction = None
+        
+        # List to store raw data for bulk insert
+        raw_data_rows = []
+        
+        # List to store decoded messages for bulk insert
+        decoded_messages = []
+        
         # Read file in chunks for large files
         chunk_size = 50000
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -423,22 +477,10 @@ def import_usbl_file(file_path, conn, file_progress=None):
                         direction = parts[1].strip()
                         data_str = ','.join(parts[2:])
                         
-                        # Only process RECEIVED messages with POSITION_RESPONSE
-                        if direction != 'RECEIVED':
-                            continue
-                        
-                        # Decode message
-                        decoded = decode_usbl_message(data_str, direction)
-                        if not decoded or decoded.get('message_type') != 'POSITION_RESPONSE':
-                            continue
-                        
                         # Parse timestamp
                         try:
                             timestamp = pd.to_datetime(timestamp_str, errors='coerce')
-                            if pd.isna(timestamp):
-                                continue
-                            
-                            if timestamp.year < 2000 or timestamp.year > 2100:
+                            if pd.isna(timestamp) or timestamp.year < 2000 or timestamp.year > 2100:
                                 continue
                         except:
                             continue
@@ -448,97 +490,209 @@ def import_usbl_file(file_path, conn, file_progress=None):
                         if last_timestamp is None or timestamp > last_timestamp:
                             last_timestamp = timestamp
                         
-                        # Extract data from decoded message
-                        seq = decoded.get('sequence')
-                        azimuth_deg = decoded.get('azimuth_deg')
-                        elevation_deg = decoded.get('elevation_deg')
-                        distance_m = decoded.get('distance_m')
-                        auv_state = decoded.get('auv_state')
-                        snr = decoded.get('snr')
+                        # Store raw data for later decoding (even if decoding fails)
+                        raw_data_rows.append((
+                            log_file_id,
+                            timestamp,
+                            direction,
+                            data_str
+                        ))
                         
-                        # Store sequence number
-                        if seq is not None:
-                            entries.append((
+                        # Handle direction change - reset buffer
+                        if direction != last_direction:
+                            received_buffer = b''
+                        last_direction = direction
+                        
+                        # Parse data bytes
+                        data_bytes = parse_bytes_from_string(data_str)
+                        if data_bytes is None:
+                            # Store error message
+                            decoded_messages.append((
+                                log_file_id,
                                 timestamp,
-                                vehicle_type,
-                                vehicle_id,
-                                data_type_ids['USBL_Sequence'],
-                                float(seq),
-                                log_file_id
+                                direction,
+                                None,  # message_id
+                                None,  # message_name
+                                None,  # message_type
+                                None,  # version
+                                None,  # device_address
+                                f"Error: Could not parse data literal: {data_str}",  # payload_decoded
+                                data_str,  # payload_raw
+                                None,  # length
+                                None,  # distance
+                                None,  # bearing
+                                None,  # elevation
+                                None,  # snr
+                                None,  # device_id
                             ))
+                            continue
                         
-                        # Store azimuth (bearing) if available
-                        if azimuth_deg is not None:
-                            entries.append((
-                                timestamp,
-                                vehicle_type,
-                                vehicle_id,
-                                data_type_ids['USBL_Bearing'],
-                                float(azimuth_deg),
-                                log_file_id
-                            ))
+                        # Process SENT messages (complete)
+                        if direction == 'SENT':
+                            decoded = decode_usbl_message_from_csv(timestamp_str, direction, data_str)
+                            if decoded:
+                                decoded_messages.append((
+                                    log_file_id,
+                                    timestamp,
+                                    direction,
+                                    decoded.get('message_id'),
+                                    decoded.get('message_name'),
+                                    decoded.get('message_type'),
+                                    decoded.get('version'),
+                                    decoded.get('device_address'),
+                                    decoded.get('payload_decoded', ''),
+                                    decoded.get('payload_raw', ''),
+                                    decoded.get('length'),
+                                    # Extracted values
+                                    decoded.get('distance'),
+                                    decoded.get('bearing') or decoded.get('azimuth'),
+                                    decoded.get('elevation'),
+                                    decoded.get('snr'),
+                                    decoded.get('device_id'),
+                                ))
                         
-                        # Store elevation if available
-                        if elevation_deg is not None:
-                            entries.append((
-                                timestamp,
-                                vehicle_type,
-                                vehicle_id,
-                                data_type_ids['USBL_Elevation'],
-                                float(elevation_deg),
-                                log_file_id
-                            ))
+                        # Process RECEIVED messages (may need reassembly)
+                        elif direction == 'RECEIVED':
+                            complete_messages, received_buffer = reassemble_received_messages(data_bytes, received_buffer)
+                            
+                            for msg_bytes in complete_messages:
+                                decoded = parse_message(msg_bytes)
+                                if decoded:
+                                    decoded_messages.append((
+                                        log_file_id,
+                                        timestamp,
+                                        direction,
+                                        decoded.get('message_id'),
+                                        decoded.get('message_name'),
+                                        decoded.get('message_type'),
+                                        decoded.get('version'),
+                                        decoded.get('device_address'),
+                                        decoded.get('payload_decoded', ''),
+                                        decoded.get('payload_raw', ''),
+                                        decoded.get('length'),
+                                        # Extracted values
+                                        decoded.get('distance'),
+                                        decoded.get('bearing') or decoded.get('azimuth'),
+                                        decoded.get('elevation'),
+                                        decoded.get('snr'),
+                                        decoded.get('device_id'),
+                                    ))
                         
-                        # Store distance if available
-                        if distance_m is not None and distance_m > 0:
-                            entries.append((
-                                timestamp,
-                                vehicle_type,
-                                vehicle_id,
-                                data_type_ids['USBL_Distance'],
-                                float(distance_m),
-                                log_file_id
-                            ))
-                        
-                        # Store AUV state if available (convert Kogger to Seaker)
-                        if auv_state is not None:
-                            seaker_state = convert_kogger_state_to_seaker(auv_state)
-                            entries.append((
-                                timestamp,
-                                vehicle_type,
-                                vehicle_id,
-                                data_type_ids['USBL_AUV_State'],
-                                float(seaker_state),
-                                log_file_id
-                            ))
-                        
-                        # Store SNR if available
-                        if snr is not None:
-                            entries.append((
-                                timestamp,
-                                vehicle_type,
-                                vehicle_id,
-                                data_type_ids['USBL_SNR'],
-                                float(snr),
-                                log_file_id
-                            ))
-                        
-                        total_rows += 1
+                        # Also process with old decoder for log_entries (keep existing functionality)
+                        if direction == 'RECEIVED':
+                            decoded_old = decode_usbl_message(data_str, direction)
+                            if decoded_old and decoded_old.get('message_type') == 'POSITION_RESPONSE':
+                                # Extract data from decoded message
+                                seq = decoded_old.get('sequence')
+                                azimuth_deg = decoded_old.get('azimuth_deg')
+                                elevation_deg = decoded_old.get('elevation_deg')
+                                distance_m = decoded_old.get('distance_m')
+                                auv_state = decoded_old.get('auv_state')
+                                snr = decoded_old.get('snr')
+                                
+                                # Store sequence number
+                                if seq is not None:
+                                    entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Sequence'],
+                                        float(seq),
+                                        log_file_id
+                                    ))
+                                
+                                # Store azimuth (bearing) if available
+                                if azimuth_deg is not None:
+                                    entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Bearing'],
+                                        float(azimuth_deg),
+                                        log_file_id
+                                    ))
+                                
+                                # Store elevation if available
+                                if elevation_deg is not None:
+                                    entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Elevation'],
+                                        float(elevation_deg),
+                                        log_file_id
+                                    ))
+                                
+                                # Store distance if available
+                                if distance_m is not None and distance_m > 0:
+                                    entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Distance'],
+                                        float(distance_m),
+                                        log_file_id
+                                    ))
+                                
+                                # Store AUV state if available (convert Kogger to Seaker)
+                                if auv_state is not None:
+                                    seaker_state = convert_kogger_state_to_seaker(auv_state)
+                                    entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_AUV_State'],
+                                        float(seaker_state),
+                                        log_file_id
+                                    ))
+                                
+                                # Store SNR if available
+                                if snr is not None:
+                                    entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_SNR'],
+                                        float(snr),
+                                        log_file_id
+                                    ))
+                                
+                                total_rows += 1
                     
-                    # Bulk insert
+                    # Bulk insert raw data first (before decoding, so we have it even if decoding fails)
+                    if raw_data_rows:
+                        execute_values(cursor, """
+                            INSERT INTO usbl_raw_data (log_file_id, timestamp, direction, data_raw)
+                            VALUES %s
+                        """, raw_data_rows, page_size=1000)
+                        conn.commit()
+                        raw_data_rows = []
+                    
+                    # Bulk insert decoded messages
+                    if decoded_messages:
+                        execute_values(cursor, """
+                            INSERT INTO usbl_decoded_messages 
+                            (log_file_id, timestamp, direction, message_id, message_name, message_type, 
+                             version, device_address, payload_decoded, payload_raw, length,
+                             distance, bearing, elevation, snr, device_id)
+                            VALUES %s
+                        """, decoded_messages, page_size=1000)
+                        conn.commit()
+                        decoded_messages = []
+                    
+                    # Bulk insert log entries
                     if entries:
                         execute_values(cursor, """
                             INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
                             VALUES %s
                         """, entries, page_size=1000)
                         conn.commit()
-                        
-                        # Update progress
-                        if file_progress is not None:
-                            progress_ratio = min(total_rows / 100000, 1.0)  # Estimate
-                            file_progress['bytes_processed'] = int(file_size * progress_ratio)
-                        
                         entries = []
+                    
+                    # Update progress
+                    if file_progress is not None:
+                        progress_ratio = min(total_rows / 100000, 1.0)  # Estimate
+                        file_progress['bytes_processed'] = int(file_size * progress_ratio)
                     
                     chunk = []
             
@@ -553,14 +707,7 @@ def import_usbl_file(file_path, conn, file_progress=None):
                     direction = parts[1].strip()
                     data_str = ','.join(parts[2:])
                     
-                    if direction != 'RECEIVED':
-                        continue
-                    
-                    decoded = decode_usbl_message(data_str, direction)
-                    # Accepter POSITION_RESPONSE et STATUS_RESPONSE
-                    if not decoded or decoded.get('message_type') not in ['POSITION_RESPONSE', 'STATUS_RESPONSE']:
-                        continue
-                    
+                    # Parse timestamp
                     try:
                         timestamp = pd.to_datetime(timestamp_str, errors='coerce')
                         if pd.isna(timestamp) or timestamp.year < 2000 or timestamp.year > 2100:
@@ -573,84 +720,196 @@ def import_usbl_file(file_path, conn, file_progress=None):
                     if last_timestamp is None or timestamp > last_timestamp:
                         last_timestamp = timestamp
                     
-                    # Extract data from decoded message
-                    seq = decoded.get('sequence')
-                    azimuth_deg = decoded.get('azimuth_deg')
-                    elevation_deg = decoded.get('elevation_deg')
-                    distance_m = decoded.get('distance_m')
-                    auv_state = decoded.get('auv_state')
-                    snr = decoded.get('snr')
+                    # Store raw data for later decoding (even if decoding fails)
+                    raw_data_rows.append((
+                        log_file_id,
+                        timestamp,
+                        direction,
+                        data_str
+                    ))
                     
-                    # Store sequence number
-                    if seq is not None:
-                        entries.append((
+                    # Handle direction change - reset buffer
+                    if direction != last_direction:
+                        received_buffer = b''
+                    last_direction = direction
+                    
+                    # Parse data bytes
+                    data_bytes = parse_bytes_from_string(data_str)
+                    if data_bytes is None:
+                        # Store error message
+                        decoded_messages.append((
+                            log_file_id,
                             timestamp,
-                            vehicle_type,
-                            vehicle_id,
-                            data_type_ids['USBL_Sequence'],
-                            float(seq),
-                            log_file_id
+                            direction,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            f"Error: Could not parse data literal: {data_str}",
+                            data_str,
+                            None,
+                            None,  # distance
+                            None,  # bearing
+                            None,  # elevation
+                            None,  # snr
+                            None,  # device_id
                         ))
+                        continue
                     
-                    # Store azimuth (bearing) if available
-                    if azimuth_deg is not None:
-                        entries.append((
-                            timestamp,
-                            vehicle_type,
-                            vehicle_id,
-                            data_type_ids['USBL_Bearing'],
-                            float(azimuth_deg),
-                            log_file_id
-                        ))
+                    # Process SENT messages (complete)
+                    if direction == 'SENT':
+                        decoded = decode_usbl_message_from_csv(timestamp_str, direction, data_str)
+                        if decoded:
+                            decoded_messages.append((
+                                log_file_id,
+                                timestamp,
+                                direction,
+                                decoded.get('message_id'),
+                                decoded.get('message_name'),
+                                decoded.get('message_type'),
+                                decoded.get('version'),
+                                decoded.get('device_address'),
+                                decoded.get('payload_decoded', ''),
+                                decoded.get('payload_raw', ''),
+                                decoded.get('length'),
+                                # Extracted values
+                                decoded.get('distance'),
+                                decoded.get('bearing') or decoded.get('azimuth'),
+                                decoded.get('elevation'),
+                                decoded.get('snr'),
+                                decoded.get('device_id'),
+                            ))
                     
-                    # Store elevation if available
-                    if elevation_deg is not None:
-                        entries.append((
-                            timestamp,
-                            vehicle_type,
-                            vehicle_id,
-                            data_type_ids['USBL_Elevation'],
-                            float(elevation_deg),
-                            log_file_id
-                        ))
+                    # Process RECEIVED messages (may need reassembly)
+                    elif direction == 'RECEIVED':
+                        complete_messages, received_buffer = reassemble_received_messages(data_bytes, received_buffer)
+                        
+                        for msg_bytes in complete_messages:
+                            decoded = parse_message(msg_bytes)
+                            if decoded:
+                                decoded_messages.append((
+                                    log_file_id,
+                                    timestamp,
+                                    direction,
+                                    decoded.get('message_id'),
+                                    decoded.get('message_name'),
+                                    decoded.get('message_type'),
+                                    decoded.get('version'),
+                                    decoded.get('device_address'),
+                                    decoded.get('payload_decoded', ''),
+                                    decoded.get('payload_raw', ''),
+                                    decoded.get('length'),
+                                    # Extracted values
+                                    decoded.get('distance'),
+                                    decoded.get('bearing') or decoded.get('azimuth'),
+                                    decoded.get('elevation'),
+                                    decoded.get('snr'),
+                                    decoded.get('device_id'),
+                                ))
                     
-                    # Store distance if available
-                    if distance_m is not None and distance_m > 0:
-                        entries.append((
-                            timestamp,
-                            vehicle_type,
-                            vehicle_id,
-                            data_type_ids['USBL_Distance'],
-                            float(distance_m),
-                            log_file_id
-                        ))
-                    
-                    # Store AUV state if available (convert Kogger to Seaker)
-                    if auv_state is not None:
-                        seaker_state = convert_kogger_state_to_seaker(auv_state)
-                        entries.append((
-                            timestamp,
-                            vehicle_type,
-                            vehicle_id,
-                            data_type_ids['USBL_AUV_State'],
-                            float(seaker_state),
-                            log_file_id
-                        ))
-                    
-                    # Store SNR if available
-                    if snr is not None:
-                        entries.append((
-                            timestamp,
-                            vehicle_type,
-                            vehicle_id,
-                            data_type_ids['USBL_SNR'],
-                            float(snr),
-                            log_file_id
-                        ))
-                    
-                    total_rows += 1
+                    # Also process with old decoder for log_entries (keep existing functionality)
+                    if direction == 'RECEIVED':
+                        decoded = decode_usbl_message(data_str, direction)
+                        # Accepter POSITION_RESPONSE et STATUS_RESPONSE
+                        if decoded and decoded.get('message_type') in ['POSITION_RESPONSE', 'STATUS_RESPONSE']:
+                            # Extract data from decoded message
+                            seq = decoded.get('sequence')
+                            azimuth_deg = decoded.get('azimuth_deg')
+                            elevation_deg = decoded.get('elevation_deg')
+                            distance_m = decoded.get('distance_m')
+                            auv_state = decoded.get('auv_state')
+                            snr = decoded.get('snr')
+                            
+                            # Store sequence number
+                            if seq is not None:
+                                entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_Sequence'],
+                                    float(seq),
+                                    log_file_id
+                                ))
+                            
+                            # Store azimuth (bearing) if available
+                            if azimuth_deg is not None:
+                                entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_Bearing'],
+                                    float(azimuth_deg),
+                                    log_file_id
+                                ))
+                            
+                            # Store elevation if available
+                            if elevation_deg is not None:
+                                entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_Elevation'],
+                                    float(elevation_deg),
+                                    log_file_id
+                                ))
+                            
+                            # Store distance if available
+                            if distance_m is not None and distance_m > 0:
+                                entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_Distance'],
+                                    float(distance_m),
+                                    log_file_id
+                                ))
+                            
+                            # Store AUV state if available (convert Kogger to Seaker)
+                            if auv_state is not None:
+                                seaker_state = convert_kogger_state_to_seaker(auv_state)
+                                entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_AUV_State'],
+                                    float(seaker_state),
+                                    log_file_id
+                                ))
+                            
+                            # Store SNR if available
+                            if snr is not None:
+                                entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_SNR'],
+                                    float(snr),
+                                    log_file_id
+                                ))
+                            
+                            total_rows += 1
         
-        # Final bulk insert
+        # Final bulk insert raw data
+        if raw_data_rows:
+            execute_values(cursor, """
+                INSERT INTO usbl_raw_data (log_file_id, timestamp, direction, data_raw)
+                VALUES %s
+            """, raw_data_rows, page_size=1000)
+            conn.commit()
+        
+        # Final bulk insert decoded messages
+        if decoded_messages:
+            execute_values(cursor, """
+                INSERT INTO usbl_decoded_messages 
+                (log_file_id, timestamp, direction, message_id, message_name, message_type, 
+                 version, device_address, payload_decoded, payload_raw, length,
+                 distance, bearing, elevation, snr, device_id)
+                VALUES %s
+            """, decoded_messages, page_size=1000)
+            conn.commit()
+        
+        # Final bulk insert log entries
         if entries:
             execute_values(cursor, """
                 INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
@@ -746,7 +1005,7 @@ def import_usv_full_file(file_path, conn, file_progress=None):
     try:
         # Check if file already exists
         cursor.execute("""
-            SELECT id FROM log_files 
+            SELECT id, import_status FROM log_files 
             WHERE filename = %s AND vehicle_type = %s AND vehicle_id = %s
             LIMIT 1
         """, (filename, vehicle_type, vehicle_id))
@@ -815,13 +1074,6 @@ def import_usv_full_file(file_path, conn, file_progress=None):
         
         # Process all matches
         matches = pattern.finditer(file_content)
-        
-        # #region agent log
-        import json
-        match_count = 0
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:816","message":"Starting pattern matching","data":{"filename":filename},"timestamp":int(time.time()*1000)}) + '\n')
-        # #endregion
         
         # Process matches in chunks
         chunk = []
@@ -954,18 +1206,10 @@ def import_usv_full_file(file_path, conn, file_progress=None):
                         
                     except (ValueError, IndexError) as e:
                         # Skip malformed lines
-                        # #region agent log
-                        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-                            f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:946","message":"Error parsing match","data":{"error":str(e)},"timestamp":int(time.time()*1000)}) + '\n')
-                        # #endregion
                         continue
                 
                 # Bulk insert entries
                 if entries:
-                    # #region agent log
-                    with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:950","message":"Bulk inserting entries","data":{"entry_count":len(entries),"total_rows":total_rows},"timestamp":int(time.time()*1000)}) + '\n')
-                    # #endregion
                     execute_values(cursor, """
                         INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
                         VALUES %s
@@ -1121,11 +1365,6 @@ def import_usv_full_file(file_path, conn, file_progress=None):
         """, (total_rows, first_timestamp, last_timestamp, log_file_id))
         conn.commit()
         
-        # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"import","hypothesisId":"A","location":"import_logs.py:1095","message":"Import completed","data":{"total_rows":total_rows,"match_count":match_count,"first_timestamp":str(first_timestamp) if first_timestamp else None,"last_timestamp":str(last_timestamp) if last_timestamp else None},"timestamp":int(time.time()*1000)}) + '\n')
-        # #endregion
-        
         print(f"✅ Imported {total_rows:,} USV full entries from {filename}")
         return True
         
@@ -1145,6 +1384,32 @@ def import_usv_full_file(file_path, conn, file_progress=None):
     finally:
         cursor.close()
 
+def flatten_json_to_settings(json_value, prefix, settings_list, settings_file_id):
+    """
+    Décompose récursivement un objet JSON en entrées individuelles.
+    
+    Args:
+        json_value: Valeur JSON (dict, list ou valeur simple)
+        prefix: Préfixe pour le nom du setting (ex: "camera")
+        settings_list: Liste à remplir avec les tuples (settings_file_id, name, value, value_type, category)
+        settings_file_id: ID du fichier de settings
+    """
+    if isinstance(json_value, dict):
+        for key, value in json_value.items():
+            new_prefix = f"{prefix}.{key}" if prefix else key
+            flatten_json_to_settings(value, new_prefix, settings_list, settings_file_id)
+    elif isinstance(json_value, list):
+        # Pour les listes, créer une entrée avec la valeur sérialisée
+        settings_list.append((settings_file_id, prefix, json.dumps(json_value), 'json', 'configuration'))
+    else:
+        # Valeur simple
+        value_type = 'string'
+        if isinstance(json_value, bool):
+            value_type = 'boolean'
+        elif isinstance(json_value, (int, float)):
+            value_type = 'number'
+        settings_list.append((settings_file_id, prefix, str(json_value), value_type, 'configuration'))
+
 def import_settings_file(file_path, conn):
     """Import a settings file."""
     filename = os.path.basename(file_path)
@@ -1156,36 +1421,95 @@ def import_settings_file(file_path, conn):
     
     cursor = conn.cursor()
     
+    # List of JSON keys to decompose
+    json_keys_to_decompose = ['camera', 'api', 'navigation', 'usbl', 'seaker', 'follow', 'Emergency']
+    
     try:
         # Create settings_file entry
         file_size = os.path.getsize(file_path)
+        
+        # Check if file already exists
         cursor.execute("""
-            INSERT INTO settings_files (filename, file_path, vehicle_type, vehicle_id, file_size_bytes, import_status, import_started_at)
-            VALUES (%s, %s, %s, %s, %s, 'importing', NOW())
-            ON CONFLICT (filename, vehicle_type, vehicle_id) DO NOTHING
-            RETURNING id
-        """, (filename, str(file_path), vehicle_type, vehicle_id, file_size))
-        result = cursor.fetchone()
-        if not result:
-            print(f"⚠️  Settings file {filename} already imported, skipping")
-            return False
-        settings_file_id = result[0]
-        conn.commit()
+            SELECT id FROM settings_files 
+            WHERE filename = %s AND vehicle_type = %s AND vehicle_id = %s
+        """, (filename, vehicle_type, vehicle_id))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Delete existing settings to allow reimport with new structure
+            settings_file_id = existing[0]
+            print(f"⚠️  Settings file {filename} already imported, deleting old data and reimporting...")
+            cursor.execute("DELETE FROM vehicle_settings WHERE settings_file_id = %s", (settings_file_id,))
+            cursor.execute("""
+                UPDATE settings_files 
+                SET import_status = 'importing', import_started_at = NOW()
+                WHERE id = %s
+            """, (settings_file_id,))
+            conn.commit()
+        else:
+            # Create new entry
+            cursor.execute("""
+                INSERT INTO settings_files (filename, file_path, vehicle_type, vehicle_id, file_size_bytes, import_status, import_started_at)
+                VALUES (%s, %s, %s, %s, %s, 'importing', NOW())
+                RETURNING id
+            """, (filename, str(file_path), vehicle_type, vehicle_id, file_size))
+            result = cursor.fetchone()
+            settings_file_id = result[0]
+            conn.commit()
         
         print(f"⚙️  Importing settings {filename} ({vehicle_type} {vehicle_id})...")
         
         # Read settings CSV - handle various formats
+        # Settings files can use tab or comma as separator
+        # But dict values contain commas, so we need to handle this carefully
+        df_rows = []
         try:
-            df = pd.read_csv(file_path, header=None, names=['setting_name', 'setting_value'], 
-                           on_bad_lines='skip', engine='python')
-        except Exception:
-            # Try with different separator or encoding
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Try to split on first tab or comma
+                    # For tab-separated: name\tvalue
+                    # For comma-separated: name,value (but value may contain commas)
+                    if '\t' in line:
+                        # Tab-separated: split on first tab
+                        parts = line.split('\t', 1)
+                        if len(parts) == 2:
+                            df_rows.append({'setting_name': parts[0].strip(), 'setting_value': parts[1].strip()})
+                    else:
+                        # Comma-separated: split on first comma only
+                        # Use a regex to split on first comma that's not inside quotes
+                        import re
+                        # Match first comma that's not inside single or double quotes
+                        match = re.match(r"^([^,]+?),\s*(.+)$", line)
+                        if match:
+                            name = match.group(1).strip()
+                            value = match.group(2).strip()
+                            df_rows.append({'setting_name': name, 'setting_value': value})
+                        else:
+                            # Fallback: split on first comma
+                            parts = line.split(',', 1)
+                            if len(parts) == 2:
+                                df_rows.append({'setting_name': parts[0].strip(), 'setting_value': parts[1].strip()})
+            
+            df = pd.DataFrame(df_rows)
+            if df.empty:
+                raise ValueError("No data read from file")
+        except Exception as e:
+            print(f"  ⚠️  Error reading file with custom parser: {e}")
+            # Fallback to pandas
             try:
-                df = pd.read_csv(file_path, header=None, names=['setting_name', 'setting_value'],
-                               sep=',', on_bad_lines='skip', engine='python', encoding='latin-1')
-            except Exception as e:
-                print(f"  ❌ Could not read settings file: {e}")
-                raise
+                df = pd.read_csv(file_path, header=None, names=['setting_name', 'setting_value'], 
+                               sep='\t', on_bad_lines='skip', engine='python')
+            except Exception:
+                try:
+                    df = pd.read_csv(file_path, header=None, names=['setting_name', 'setting_value'],
+                                   sep=',', on_bad_lines='skip', engine='python', encoding='latin-1')
+                except Exception as e2:
+                    print(f"  ❌ Could not read settings file: {e2}")
+                    raise
         
         # Extract metadata
         git_branch = None
@@ -1207,8 +1531,10 @@ def import_settings_file(file_path, conn):
             
             # Determine value type and category
             value_type = 'string'
+            is_dict_like = False
             if value.startswith('{') and value.endswith('}'):
                 value_type = 'json'
+                is_dict_like = True
             elif value.replace('.', '', 1).replace('-', '', 1).isdigit():
                 value_type = 'number'
             elif value.lower() in ['true', 'false']:
@@ -1226,7 +1552,56 @@ def import_settings_file(file_path, conn):
             elif name in ['vehicle', 'camera', 'api', 'navigation', 'usbl', 'seaker', 'follow', 'Emergency']:
                 category = 'configuration'
             
-            settings.append((settings_file_id, name, value, value_type, category))
+            # If this is a dict-like value for a key we want to decompose, parse and flatten it
+            if is_dict_like and name in json_keys_to_decompose:
+                try:
+                    # Normalize the value: replace tabs with commas (but be careful with values containing tabs)
+                    # First, try to parse as JSON
+                    parsed_json = None
+                    try:
+                        parsed_json = json.loads(value)
+                    except json.JSONDecodeError:
+                        # If JSON parsing fails, normalize Python dict syntax
+                        # The CSV uses tabs instead of commas between key-value pairs
+                        # Replace tabs with commas (simple approach: replace all tabs in dict context)
+                        import re
+                        normalized_value = value
+                        # Replace tabs that appear between key-value pairs
+                        # Pattern: 'key': value\t'key2': -> 'key': value, 'key2':
+                        # Look for tab followed by quote (start of next key)
+                        normalized_value = re.sub(r"\t\s*(['\"][^'\"]*:)", r', \1', normalized_value)
+                        
+                        # Try to parse as Python dict
+                        try:
+                            parsed_json = ast.literal_eval(normalized_value)
+                        except (ValueError, SyntaxError) as e1:
+                            # If that fails, try a more aggressive normalization
+                            # Replace all tabs with commas (might work if no tabs in values)
+                            normalized_value2 = value.replace('\t', ', ')
+                            try:
+                                parsed_json = ast.literal_eval(normalized_value2)
+                            except (ValueError, SyntaxError) as e2:
+                                # Last resort: try original value
+                                try:
+                                    parsed_json = ast.literal_eval(value)
+                                except (ValueError, SyntaxError):
+                                    raise ValueError(f"Could not parse dict after normalization attempts: {e1}, {e2}")
+                    
+                    if parsed_json is None:
+                        raise ValueError("Could not parse dict value")
+                    
+                    # Keep the original entry with full value
+                    settings.append((settings_file_id, name, value, value_type, category))
+                    # Add flattened entries
+                    flatten_json_to_settings(parsed_json, name, settings, settings_file_id)
+                except (json.JSONDecodeError, ValueError, SyntaxError) as e:
+                    # If parsing fails, just add the original entry
+                    print(f"  ⚠️  Could not parse dict for {name}: {e}")
+                    print(f"     Value: {value[:100]}...")  # Print first 100 chars for debugging
+                    settings.append((settings_file_id, name, value, value_type, category))
+            else:
+                # Regular setting, add as is
+                settings.append((settings_file_id, name, value, value_type, category))
         
         # Bulk insert settings
         cursor.executemany("""

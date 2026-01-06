@@ -5,7 +5,7 @@ Flask web application for visualizing log data.
 
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 import os
 from dotenv import load_dotenv
 from pathlib import Path
@@ -16,6 +16,8 @@ import threading
 import uuid
 import json
 import time
+import math
+import pandas as pd
 
 load_dotenv()
 
@@ -598,6 +600,12 @@ def get_run_bearing_ping(run_id):
 @app.route('/api/run/<int:run_id>/usv_position')
 def get_run_usv_position(run_id):
     """API endpoint to get USV GPS position data for the time period of an AUV run."""
+    # #region agent log
+    import json
+    with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:600","message":"API called","data":{"run_id":run_id},"timestamp":int(time.time()*1000)}) + '\n')
+    # #endregion
+    
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -611,16 +619,69 @@ def get_run_usv_position(run_id):
         
         run_info = cursor.fetchone()
         if not run_info:
+            # #region agent log
+            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:612","message":"Run not found","data":{"run_id":run_id},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
             return jsonify({'error': 'Run not found'}), 404
         
         start_time = run_info['first_timestamp']
         end_time = run_info['last_timestamp']
         
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"C","location":"app.py:618","message":"AUV run time range","data":{"start_time":str(start_time),"end_time":str(end_time)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
         # Debug: print time range
         print(f"USV Position Query: Looking for data between {start_time} and {end_time}")
         
+        # #region agent log - Hypothesis D: Check if USV data exists with different vehicle_type
+        cursor.execute("""
+            SELECT DISTINCT vehicle_type, COUNT(*) as count
+            FROM log_entries
+            WHERE time >= %s AND time <= %s
+            GROUP BY vehicle_type
+        """, (start_time, end_time))
+        vehicle_types = cursor.fetchall()
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"D","location":"app.py:625","message":"Vehicle types in time range","data":{"vehicle_types":[{"type":v['vehicle_type'],"count":v['count']} for v in vehicle_types]},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # #region agent log - Hypothesis B: Check what GPS data types exist for USV
+        cursor.execute("""
+            SELECT DISTINCT dtc.data_type, COUNT(*) as count
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type LIKE 'GPS%%'
+              AND le.time >= %s
+              AND le.time <= %s
+            GROUP BY dtc.data_type
+        """, (start_time, end_time))
+        gps_types = cursor.fetchall()
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:635","message":"GPS data types for USV in time range","data":{"gps_types":[{"type":g['data_type'],"count":g['count']} for g in gps_types]},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # #region agent log - Hypothesis A: Check if any USV navigation data exists at all
+        cursor.execute("""
+            SELECT COUNT(*) as total_count,
+                   MIN(time) as min_time,
+                   MAX(time) as max_time
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type IN ('GPS_RAW_INT_lat', 'GPS_RAW_INT_lon')
+        """)
+        usv_gps_summary = cursor.fetchone()
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:645","message":"USV GPS data summary (all time)","data":{"total_count":usv_gps_summary['total_count'],"min_time":str(usv_gps_summary['min_time']) if usv_gps_summary['min_time'] else None,"max_time":str(usv_gps_summary['max_time']) if usv_gps_summary['max_time'] else None},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
         # Get USV GPS position data for this time period
-        # GPS_RAW_INT_lat and GPS_RAW_INT_lon are in degrees * 1e7 format
+        # USV navigation logs use 'Lat' and 'Lon' (not 'GPS_RAW_INT_lat'/'GPS_RAW_INT_lon')
+        # Try both naming conventions for compatibility
         query = """
             SELECT 
                 le.time,
@@ -628,13 +689,20 @@ def get_run_usv_position(run_id):
             FROM log_entries le
             JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
             WHERE le.vehicle_type = 'USV'
-              AND dtc.data_type = 'GPS_RAW_INT_lat'
+              AND dtc.data_type IN ('GPS_RAW_INT_lat', 'Lat', 'RAW_Lat')
               AND le.time >= %s
               AND le.time <= %s
             ORDER BY le.time ASC
         """
         cursor.execute(query, (start_time, end_time))
         lat_data = cursor.fetchall()
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            sample_lats = [{"time":str(l['time']),"value":l['lat_raw']} for l in lat_data[:3]] if lat_data else []
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:660","message":"Latitude query result","data":{"count":len(lat_data),"samples":sample_lats},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
         print(f"Found {len(lat_data)} latitude points")
         
         # Get longitude data
@@ -645,13 +713,20 @@ def get_run_usv_position(run_id):
             FROM log_entries le
             JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
             WHERE le.vehicle_type = 'USV'
-              AND dtc.data_type = 'GPS_RAW_INT_lon'
+              AND dtc.data_type IN ('GPS_RAW_INT_lon', 'Lon', 'RAW_Lon')
               AND le.time >= %s
               AND le.time <= %s
             ORDER BY le.time ASC
         """
         cursor.execute(query, (start_time, end_time))
         lon_data = cursor.fetchall()
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            sample_lons = [{"time":str(l['time']),"value":l['lon_raw']} for l in lon_data[:3]] if lon_data else []
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:675","message":"Longitude query result","data":{"count":len(lon_data),"samples":sample_lons},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
         print(f"Found {len(lon_data)} longitude points")
         
         # Combine lat and lon by matching closest timestamps
@@ -660,8 +735,9 @@ def get_run_usv_position(run_id):
         result = []
         
         # Convert to lists with timestamps as epoch for easier comparison
-        lat_list = [(row['time'], row['lat_raw']) for row in lat_data if row['time']]
-        lon_list = [(row['time'], row['lon_raw']) for row in lon_data if row['time']]
+        # Filter out None values for both time and lat_raw/lon_raw
+        lat_list = [(row['time'], row['lat_raw']) for row in lat_data if row['time'] and row['lat_raw'] is not None]
+        lon_list = [(row['time'], row['lon_raw']) for row in lon_data if row['time'] and row['lon_raw'] is not None]
         
         # Use a simple approach: for each lat point, find the lon point with the closest timestamp
         lon_idx = 0
@@ -701,16 +777,57 @@ def get_run_usv_position(run_id):
             if best_lon and best_diff < 1.0:
                 lon_time, lon_raw = best_lon
                 # Use the lat timestamp as the reference time
-                lat_degrees = lat_raw / 1e7
-                lon_degrees = lon_raw / 1e7
-                result.append({
-                    'time': lat_time.isoformat(),
-                    'lat': lat_degrees,
-                    'lon': lon_degrees
-                })
+                # Note: Lat and Lon can be in different formats!
+                # Check each value independently for GPS_RAW_INT format (large numbers > 1e6) or degrees
+                # Also check for None values to avoid errors
+                if lat_raw is not None and lon_raw is not None:
+                    # Convert lat independently
+                    if abs(lat_raw) > 1e6:
+                        # GPS_RAW_INT format: divide by 1e7
+                        lat_degrees = lat_raw / 1e7
+                    else:
+                        # Already in degrees
+                        lat_degrees = lat_raw
+                    
+                    # Convert lon independently (may be different format than lat!)
+                    if abs(lon_raw) > 1e6:
+                        # GPS_RAW_INT format: divide by 1e7
+                        lon_degrees = lon_raw / 1e7
+                    else:
+                        # Already in degrees
+                        lon_degrees = lon_raw
+                    
+                    # #region agent log - Hypothesis E: Check if coordinates are (0,0)
+                    if lat_degrees == 0 and lon_degrees == 0:
+                        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"E","location":"app.py:705","message":"Found (0,0) coordinate","data":{"time":lat_time.isoformat(),"lat_raw":lat_raw,"lon_raw":lon_raw},"timestamp":int(time.time()*1000)}) + '\n')
+                    # #endregion
+                    
+                    result.append({
+                        'time': lat_time.isoformat(),
+                        'lat': lat_degrees,
+                        'lon': lon_degrees
+                    })
+        
+        # #region agent log
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:715","message":"Final result","data":{"result_count":len(result),"sample_results":result[:3] if result else []},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
         
         print(f"Returning {len(result)} position points (matched within 1 second)")
         return jsonify(result)
+        
+    except Exception as e:
+        # #region agent log
+        import traceback
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"ERROR","location":"app.py:usv_position","message":"Exception in usv_position","data":{"error":error_msg,"traceback":error_traceback},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
         
     finally:
         cursor.close()
@@ -812,6 +929,362 @@ def get_stats():
         }
         
         return jsonify(stats)
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/tables/log_files')
+def get_table_log_files():
+    """API endpoint to get log_files table data with pagination."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 100))
+        vehicle_type = request.args.get('vehicle_type', '')
+        import_status = request.args.get('import_status', '')
+        
+        offset = (page - 1) * per_page
+        
+        query = "SELECT * FROM log_files WHERE 1=1"
+        count_query = "SELECT COUNT(*) as total FROM log_files WHERE 1=1"
+        params = []
+        count_params = []
+        
+        if vehicle_type:
+            query += " AND vehicle_type = %s"
+            count_query += " AND vehicle_type = %s"
+            params.append(vehicle_type)
+            count_params.append(vehicle_type)
+        
+        if import_status:
+            query += " AND import_status = %s"
+            count_query += " AND import_status = %s"
+            params.append(import_status)
+            count_params.append(import_status)
+        
+        query += " ORDER BY id DESC LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+        
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()['total']
+        
+        cursor.execute(query, params)
+        entries = cursor.fetchall()
+        
+        # Convert to dict and format timestamps
+        entries_list = []
+        for entry in entries:
+            entry_dict = dict(entry)
+            # Convert timestamps to ISO format
+            for key in ['import_started_at', 'import_completed_at', 'first_timestamp', 'last_timestamp', 'created_at']:
+                if entry_dict.get(key):
+                    entry_dict[key] = entry_dict[key].isoformat()
+            entries_list.append(entry_dict)
+        
+        return jsonify({
+            'entries': entries_list,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/tables/data_type_catalog')
+def get_table_data_type_catalog():
+    """API endpoint to get data_type_catalog table data with pagination."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 100))
+        vehicle_type = request.args.get('vehicle_type', '')
+        category = request.args.get('category', '')
+        
+        offset = (page - 1) * per_page
+        
+        query = "SELECT * FROM data_type_catalog WHERE 1=1"
+        count_query = "SELECT COUNT(*) as total FROM data_type_catalog WHERE 1=1"
+        params = []
+        count_params = []
+        
+        if vehicle_type:
+            query += " AND (vehicle_type = %s OR vehicle_type = 'BOTH')"
+            count_query += " AND (vehicle_type = %s OR vehicle_type = 'BOTH')"
+            params.append(vehicle_type)
+            count_params.append(vehicle_type)
+        
+        if category:
+            query += " AND category = %s"
+            count_query += " AND category = %s"
+            params.append(category)
+            count_params.append(category)
+        
+        query += " ORDER BY id ASC LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+        
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()['total']
+        
+        cursor.execute(query, params)
+        entries = cursor.fetchall()
+        
+        # Convert to dict and format timestamps
+        entries_list = []
+        for entry in entries:
+            entry_dict = dict(entry)
+            if entry_dict.get('created_at'):
+                entry_dict['created_at'] = entry_dict['created_at'].isoformat()
+            entries_list.append(entry_dict)
+        
+        return jsonify({
+            'entries': entries_list,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/tables/log_entries')
+def get_table_log_entries():
+    """API endpoint to get log_entries table data with pagination and JOINs."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 100))
+        vehicle_type = request.args.get('vehicle_type', '')
+        data_type = request.args.get('data_type', '')
+        start_time = request.args.get('start_time', '')
+        end_time = request.args.get('end_time', '')
+        
+        offset = (page - 1) * per_page
+        
+        query = """
+            SELECT 
+                le.time,
+                le.vehicle_type,
+                le.vehicle_id,
+                le.data_type_id,
+                le.value,
+                le.log_file_id,
+                le.created_at,
+                dtc.data_type,
+                dtc.vehicle_type as data_type_vehicle_type,
+                lf.filename AS source_filename
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            JOIN log_files lf ON lf.id = le.log_file_id
+            WHERE 1=1
+        """
+        count_query = """
+            SELECT COUNT(*) as total
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE 1=1
+        """
+        params = []
+        count_params = []
+        
+        if vehicle_type:
+            query += " AND le.vehicle_type = %s"
+            count_query += " AND le.vehicle_type = %s"
+            params.append(vehicle_type)
+            count_params.append(vehicle_type)
+        
+        if data_type:
+            query += " AND dtc.data_type = %s"
+            count_query += " AND dtc.data_type = %s"
+            params.append(data_type)
+            count_params.append(data_type)
+        
+        if start_time:
+            query += " AND le.time >= %s"
+            count_query += " AND le.time >= %s"
+            params.append(start_time)
+            count_params.append(start_time)
+        
+        if end_time:
+            query += " AND le.time <= %s"
+            count_query += " AND le.time <= %s"
+            params.append(end_time)
+            count_params.append(end_time)
+        
+        query += " ORDER BY le.time DESC LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+        
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()['total']
+        
+        cursor.execute(query, params)
+        entries = cursor.fetchall()
+        
+        # Convert to dict and format timestamps
+        entries_list = []
+        for entry in entries:
+            entry_dict = dict(entry)
+            if entry_dict.get('time'):
+                entry_dict['time'] = entry_dict['time'].isoformat()
+            if entry_dict.get('created_at'):
+                entry_dict['created_at'] = entry_dict['created_at'].isoformat()
+            entries_list.append(entry_dict)
+        
+        return jsonify({
+            'entries': entries_list,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/tables/settings_files')
+def get_table_settings_files():
+    """API endpoint to get settings_files table data with pagination."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 100))
+        vehicle_type = request.args.get('vehicle_type', '')
+        import_status = request.args.get('import_status', '')
+        
+        offset = (page - 1) * per_page
+        
+        query = "SELECT * FROM settings_files WHERE 1=1"
+        count_query = "SELECT COUNT(*) as total FROM settings_files WHERE 1=1"
+        params = []
+        count_params = []
+        
+        if vehicle_type:
+            query += " AND vehicle_type = %s"
+            count_query += " AND vehicle_type = %s"
+            params.append(vehicle_type)
+            count_params.append(vehicle_type)
+        
+        if import_status:
+            query += " AND import_status = %s"
+            count_query += " AND import_status = %s"
+            params.append(import_status)
+            count_params.append(import_status)
+        
+        query += " ORDER BY id DESC LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+        
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()['total']
+        
+        cursor.execute(query, params)
+        entries = cursor.fetchall()
+        
+        # Convert to dict and format timestamps
+        entries_list = []
+        for entry in entries:
+            entry_dict = dict(entry)
+            # Convert timestamps to ISO format
+            for key in ['import_started_at', 'import_completed_at', 'created_at']:
+                if entry_dict.get(key):
+                    entry_dict[key] = entry_dict[key].isoformat()
+            entries_list.append(entry_dict)
+        
+        return jsonify({
+            'entries': entries_list,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/tables/vehicle_settings')
+def get_table_vehicle_settings():
+    """API endpoint to get vehicle_settings table data with pagination and JOIN."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 100))
+        settings_file_id = request.args.get('settings_file_id', '')
+        category = request.args.get('category', '')
+        setting_name = request.args.get('setting_name', '')
+        
+        offset = (page - 1) * per_page
+        
+        query = """
+            SELECT 
+                vs.*,
+                sf.filename AS settings_filename,
+                sf.vehicle_type,
+                sf.vehicle_id
+            FROM vehicle_settings vs
+            JOIN settings_files sf ON sf.id = vs.settings_file_id
+            WHERE 1=1
+        """
+        count_query = """
+            SELECT COUNT(*) as total
+            FROM vehicle_settings vs
+            WHERE 1=1
+        """
+        params = []
+        count_params = []
+        
+        if settings_file_id:
+            query += " AND vs.settings_file_id = %s"
+            count_query += " AND vs.settings_file_id = %s"
+            params.append(settings_file_id)
+            count_params.append(settings_file_id)
+        
+        if category:
+            query += " AND vs.category = %s"
+            count_query += " AND vs.category = %s"
+            params.append(category)
+            count_params.append(category)
+        
+        if setting_name:
+            query += " AND vs.setting_name ILIKE %s"
+            count_query += " AND vs.setting_name ILIKE %s"
+            params.append(f'%{setting_name}%')
+            count_params.append(f'%{setting_name}%')
+        
+        query += " ORDER BY vs.id DESC LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+        
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()['total']
+        
+        cursor.execute(query, params)
+        entries = cursor.fetchall()
+        
+        # Convert to dict and format timestamps
+        entries_list = []
+        for entry in entries:
+            entry_dict = dict(entry)
+            if entry_dict.get('created_at'):
+                entry_dict['created_at'] = entry_dict['created_at'].isoformat()
+            entries_list.append(entry_dict)
+        
+        return jsonify({
+            'entries': entries_list,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page
+        })
     finally:
         cursor.close()
         conn.close()
@@ -1688,6 +2161,121 @@ def get_run_usv_order(run_id):
         cursor.close()
         conn.close()
 
+@app.route('/api/run/<int:run_id>/settings')
+def get_run_settings(run_id):
+    """Get specific settings for a run (minAltitudeStartBreak and minAltitudeFullReverse)."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Get run info
+        cursor.execute("""
+            SELECT vehicle_type, vehicle_id, first_timestamp
+            FROM log_files
+            WHERE id = %s
+        """, (run_id,))
+        run = cursor.fetchone()
+        
+        if not run:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        # Find associated settings file (same logic as get_settings)
+        cursor.execute("""
+            SELECT 
+                sf.id as settings_file_id,
+                sf.filename as settings_filename,
+                sf.vehicle_id,
+                sf.import_completed_at,
+                sf.import_status
+            FROM settings_files sf
+            WHERE sf.vehicle_type = %s AND sf.import_status = 'completed'
+            ORDER BY sf.filename ASC
+        """, (run['vehicle_type'],))
+        all_settings_files = cursor.fetchall()
+        
+        # Extract timestamp from filename and find best match
+        import re
+        from datetime import datetime
+        best_match = None
+        best_timestamp = None
+        
+        if run['first_timestamp']:
+            run_timestamp = run['first_timestamp']
+            if isinstance(run_timestamp, str):
+                try:
+                    run_timestamp = datetime.fromisoformat(run_timestamp.replace('Z', '+00:00'))
+                except:
+                    run_timestamp = None
+            elif not isinstance(run_timestamp, datetime):
+                run_timestamp = None
+            
+            if run_timestamp:
+                for sf in all_settings_files:
+                    if sf['vehicle_id'] == run['vehicle_id']:
+                        filename = sf['settings_filename']
+                        match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', filename)
+                        if match:
+                            try:
+                                timestamp_str = match.group(1)
+                                file_timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d_%H-%M-%S')
+                                
+                                if isinstance(run_timestamp, datetime):
+                                    if run_timestamp.tzinfo is not None:
+                                        run_timestamp_naive = run_timestamp.replace(tzinfo=None)
+                                    else:
+                                        run_timestamp_naive = run_timestamp
+                                    
+                                    if file_timestamp <= run_timestamp_naive:
+                                        if best_timestamp is None or file_timestamp > best_timestamp:
+                                            best_timestamp = file_timestamp
+                                            best_match = sf['settings_file_id']
+                            except Exception:
+                                pass
+        
+        if not best_match:
+            return jsonify({
+                'minAltitudeStartBreak': None,
+                'minAltitudeFullReverse': None
+            })
+        
+        # Get the two settings
+        cursor.execute("""
+            SELECT setting_name, setting_value, value_type
+            FROM vehicle_settings
+            WHERE settings_file_id = %s 
+            AND setting_name IN ('follow.minAltitudeStartBreak', 'follow.minAltitudeFullReverse')
+        """, (best_match,))
+        settings = cursor.fetchall()
+        
+        result = {
+            'minAltitudeStartBreak': None,
+            'minAltitudeFullReverse': None
+        }
+        
+        for setting in settings:
+            value = setting['setting_value']
+            # Convert to number if possible
+            try:
+                if setting['value_type'] == 'number':
+                    value = float(value)
+                elif setting['value_type'] == 'boolean':
+                    value = bool(value)
+            except:
+                pass
+            
+            if setting['setting_name'] == 'follow.minAltitudeStartBreak':
+                result['minAltitudeStartBreak'] = value
+            elif setting['setting_name'] == 'follow.minAltitudeFullReverse':
+                result['minAltitudeFullReverse'] = value
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.route('/api/settings')
 def get_settings():
     """API endpoint to get settings organized by runs for comparison."""
@@ -1722,38 +2310,123 @@ def get_settings():
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1562","message":"Settings files count","data":{"total":settings_count['count'],"completed":settings_count['completed_count']},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
-        # Get all runs for this vehicle type with their associated settings files
-        query = """
+        # Debug: Log all settings files found
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1565","message":"All settings files query","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
+        
+        # Get all settings files for this vehicle type
+        # Show ALL settings files, not just those associated with runs
+        cursor.execute("""
+            SELECT 
+                sf.id as settings_file_id,
+                sf.filename as settings_filename,
+                sf.vehicle_id,
+                sf.import_completed_at,
+                sf.import_status
+            FROM settings_files sf
+            WHERE sf.vehicle_type = %s
+            ORDER BY sf.filename ASC
+        """, (vehicle_type,))
+        all_settings_files_raw = cursor.fetchall()
+        
+        # Filter to only completed files and log what we found
+        all_settings_files = []
+        for sf in all_settings_files_raw:
+            if sf['import_status'] == 'completed':
+                all_settings_files.append(sf)
+            else:
+                # Log files that are not completed
+                with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1850","message":"Settings file not completed","data":{"filename":sf['settings_filename'],"status":sf['import_status']},"timestamp":int(time.time()*1000)}) + '\n')
+        
+        # Log how many completed files we found
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1855","message":"Completed settings files","data":{"count":len(all_settings_files),"files":[{"id":sf['settings_file_id'],"filename":sf['settings_filename']} for sf in all_settings_files]},"timestamp":int(time.time()*1000)}) + '\n')
+        
+        # Extract timestamp from filename in Python (more reliable than SQL)
+        import re
+        from datetime import datetime
+        for sf in all_settings_files:
+            filename = sf['settings_filename']
+            # Extract timestamp from filename: YYYY-MM-DD_HH-MM-SS
+            match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', filename)
+            if match:
+                try:
+                    timestamp_str = match.group(1)
+                    file_timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d_%H-%M-%S')
+                    sf['file_timestamp'] = file_timestamp.isoformat()
+                except:
+                    sf['file_timestamp'] = None
+            else:
+                sf['file_timestamp'] = None
+        
+        # Get all runs for this vehicle type to show which settings file is associated with each run
+        # We'll match settings files to runs in Python after extracting timestamps
+        cursor.execute("""
             SELECT 
                 lf.id as run_id,
                 lf.filename as run_filename,
                 lf.first_timestamp,
-                lf.vehicle_id,
-                sf.id as settings_file_id,
-                sf.filename as settings_filename,
-                sf.import_completed_at
+                lf.vehicle_id
             FROM log_files lf
-            LEFT JOIN LATERAL (
-                SELECT sf.id, sf.filename, sf.import_completed_at
-                FROM settings_files sf
-                WHERE sf.vehicle_type = lf.vehicle_type 
-                    AND sf.vehicle_id = lf.vehicle_id
-                    AND sf.import_completed_at <= lf.first_timestamp
-                    AND sf.import_status = 'completed'
-                ORDER BY sf.import_completed_at DESC
-                LIMIT 1
-            ) sf ON true
             WHERE lf.vehicle_type = %s
                 AND lf.import_status = 'completed'
                 AND lf.first_timestamp IS NOT NULL
             ORDER BY lf.first_timestamp ASC
-        """
-        cursor.execute(query, (vehicle_type,))
+        """, (vehicle_type,))
         runs_data = cursor.fetchall()
+        
+        # Match settings files to runs based on timestamp
+        import re
+        from datetime import datetime
+        for run in runs_data:
+            run['associated_settings_file_id'] = None
+            if run['first_timestamp']:
+                # Find the most recent settings file for this vehicle that was created before the run
+                best_match = None
+                best_timestamp = None
+                
+                # Convert run timestamp to datetime for comparison
+                run_timestamp = run['first_timestamp']
+                if isinstance(run_timestamp, str):
+                    try:
+                        run_timestamp = datetime.fromisoformat(run_timestamp.replace('Z', '+00:00'))
+                    except:
+                        continue
+                elif not isinstance(run_timestamp, datetime):
+                    # If it's a datetime object from PostgreSQL, use it directly
+                    run_timestamp = run_timestamp
+                
+                for sf in all_settings_files:
+                    if sf['vehicle_id'] == run['vehicle_id']:
+                        filename = sf['settings_filename']
+                        match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', filename)
+                        if match:
+                            try:
+                                timestamp_str = match.group(1)
+                                file_timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d_%H-%M-%S')
+                                
+                                # Compare timestamps (handle timezone-aware vs naive)
+                                if isinstance(run_timestamp, datetime):
+                                    # Make both timezone-naive for comparison
+                                    if run_timestamp.tzinfo is not None:
+                                        run_timestamp_naive = run_timestamp.replace(tzinfo=None)
+                                    else:
+                                        run_timestamp_naive = run_timestamp
+                                    
+                                    if file_timestamp <= run_timestamp_naive:
+                                        if best_timestamp is None or file_timestamp > best_timestamp:
+                                            best_timestamp = file_timestamp
+                                            best_match = sf['settings_file_id']
+                            except Exception as e:
+                                # Skip if timestamp parsing fails
+                                pass
+                
+                run['associated_settings_file_id'] = best_match
         
         # #region agent log
         with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1590","message":"Runs query result","data":{"runs_found":len(runs_data),"runs_with_settings":sum(1 for r in runs_data if r['settings_file_id'])},"timestamp":int(time.time()*1000)}) + '\n')
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1590","message":"Runs query result","data":{"runs_found":len(runs_data),"runs_with_settings":sum(1 for r in runs_data if r.get('associated_settings_file_id'))},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
         # #region agent log - Debug: Check settings files and runs timestamps
@@ -1784,78 +2457,131 @@ def get_settings():
                     "filename": r['run_filename'],
                     "vehicle_id": r['vehicle_id'],
                     "first_timestamp": r['first_timestamp'].isoformat() if r['first_timestamp'] else None,
-                    "settings_file_id": r['settings_file_id']
+                    "associated_settings_file_id": r.get('associated_settings_file_id')
                 })
             with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
                 f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1625","message":"Sample runs","data":{"runs":sample_runs},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
-        if not runs_data:
+        if not all_settings_files:
             # #region agent log
             with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1595","message":"No runs found","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
+                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1595","message":"No settings files found","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
             # #endregion
             return jsonify({
                 'runs': [],
+                'settings_files': [],
                 'settings_matrix': {},
                 'all_setting_names': []
             })
         
-        # Get all settings for all runs
-        runs_list = []
+        # Build list of settings files (columns in the table)
+        settings_files_list = []
+        for sf in all_settings_files:
+            settings_file_dict = {
+                'settings_file_id': sf['settings_file_id'],
+                'settings_filename': sf['settings_filename'],
+                'vehicle_id': sf['vehicle_id'],
+                'file_timestamp': sf.get('file_timestamp')  # Already a string or None
+            }
+            settings_files_list.append(settings_file_dict)
+        
+        # Get all settings for all settings files
         settings_matrix = {}
         all_setting_names_set = set()
         
-        for run in runs_data:
-            run_dict = {
-                'run_id': run['run_id'],
-                'run_filename': run['run_filename'],
-                'first_timestamp': run['first_timestamp'].isoformat() if run['first_timestamp'] else None,
-                'vehicle_id': run['vehicle_id'],
-                'settings_file_id': run['settings_file_id'],
-                'settings_filename': run['settings_filename']
-            }
-            runs_list.append(run_dict)
+        for sf in all_settings_files:
+            settings_file_id = sf['settings_file_id']
             
             # #region agent log
             with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1615","message":"Processing run","data":{"run_id":run['run_id'],"has_settings_file":bool(run['settings_file_id']),"vehicle_id":run['vehicle_id']},"timestamp":int(time.time()*1000)}) + '\n')
+                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1615","message":"Processing settings file","data":{"settings_file_id":settings_file_id,"filename":sf['settings_filename']},"timestamp":int(time.time()*1000)}) + '\n')
             # #endregion
             
-            # Get settings for this run's settings file
-            if run['settings_file_id']:
-                settings_query = """
-                    SELECT setting_name, setting_value, category
-                    FROM vehicle_settings
-                    WHERE settings_file_id = %s
-                    ORDER BY category, setting_name
-                """
-                cursor.execute(settings_query, (run['settings_file_id'],))
-                settings = cursor.fetchall()
+            # Get settings for this settings file
+            settings_query = """
+                SELECT setting_name, setting_value, category
+                FROM vehicle_settings
+                WHERE settings_file_id = %s
+                ORDER BY category, setting_name
+            """
+            cursor.execute(settings_query, (settings_file_id,))
+            settings = cursor.fetchall()
+            
+            # #region agent log
+            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1628","message":"Settings loaded for settings file","data":{"settings_file_id":settings_file_id,"settings_count":len(settings)},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+            
+            for setting in settings:
+                setting_name = setting['setting_name']
+                all_setting_names_set.add(setting_name)
                 
-                # #region agent log
-                with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
-                    f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1628","message":"Settings loaded for run","data":{"run_id":run['run_id'],"settings_count":len(settings)},"timestamp":int(time.time()*1000)}) + '\n')
-                # #endregion
+                if setting_name not in settings_matrix:
+                    settings_matrix[setting_name] = {}
                 
-                for setting in settings:
-                    setting_name = setting['setting_name']
-                    all_setting_names_set.add(setting_name)
-                    
-                    if setting_name not in settings_matrix:
-                        settings_matrix[setting_name] = {}
-                    
-                    settings_matrix[setting_name][f"run_{run['run_id']}"] = setting['setting_value']
+                settings_matrix[setting_name][f"settings_file_{settings_file_id}"] = setting['setting_value']
         
         # Sort setting names for consistent display
         all_setting_names = sorted(list(all_setting_names_set))
         
         # Build complete matrix (fill missing values with null)
         for setting_name in all_setting_names:
-            for run in runs_list:
-                run_key = f"run_{run['run_id']}"
-                if run_key not in settings_matrix[setting_name]:
-                    settings_matrix[setting_name][run_key] = None
+            for sf in settings_files_list:
+                settings_file_key = f"settings_file_{sf['settings_file_id']}"
+                if settings_file_key not in settings_matrix[setting_name]:
+                    settings_matrix[setting_name][settings_file_key] = None
+        
+        # Build settings groups (group settings by prefix before first dot)
+        settings_groups = {}
+        json_keys_to_group = ['camera', 'api', 'navigation', 'usbl', 'seaker', 'follow', 'Emergency']
+        # Also create lowercase versions for case-insensitive matching
+        json_keys_to_group_lower = [k.lower() for k in json_keys_to_group]
+        
+        for setting_name in all_setting_names:
+            setting_name_lower = setting_name.lower()
+            # Check if this setting belongs to a group (has a dot and starts with a known JSON key)
+            if '.' in setting_name:
+                prefix = setting_name.split('.')[0]
+                prefix_lower = prefix.lower()
+                # Check both exact match and case-insensitive match
+                if prefix in json_keys_to_group or prefix_lower in json_keys_to_group_lower:
+                    # Use the canonical name (from json_keys_to_group)
+                    canonical_prefix = prefix
+                    for key in json_keys_to_group:
+                        if key.lower() == prefix_lower:
+                            canonical_prefix = key
+                            break
+                    if canonical_prefix not in settings_groups:
+                        settings_groups[canonical_prefix] = []
+                    settings_groups[canonical_prefix].append(setting_name)
+            # Also check if the setting name itself is one of the JSON keys (the original entry)
+            elif setting_name in json_keys_to_group or setting_name_lower in json_keys_to_group_lower:
+                # Use the canonical name
+                canonical_name = setting_name
+                for key in json_keys_to_group:
+                    if key.lower() == setting_name_lower:
+                        canonical_name = key
+                        break
+                if canonical_name not in settings_groups:
+                    settings_groups[canonical_name] = []
+                settings_groups[canonical_name].append(setting_name)
+        
+        # Sort settings within each group
+        for group_name in settings_groups:
+            settings_groups[group_name] = sorted(settings_groups[group_name])
+        
+        # Build runs list for reference (which run uses which settings file)
+        runs_list = []
+        for run in runs_data:
+            run_dict = {
+                'run_id': run['run_id'],
+                'run_filename': run['run_filename'],
+                'first_timestamp': run['first_timestamp'].isoformat() if run['first_timestamp'] else None,
+                'vehicle_id': run['vehicle_id'],
+                'associated_settings_file_id': run['associated_settings_file_id']
+            }
+            runs_list.append(run_dict)
         
         # #region agent log
         with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
@@ -1864,9 +2590,1272 @@ def get_settings():
         
         return jsonify({
             'runs': runs_list,
+            'settings_files': settings_files_list,
             'settings_matrix': settings_matrix,
+            'settings_groups': settings_groups,
             'all_setting_names': all_setting_names
         })
+        
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"ERROR","location":"app.py:get_settings","message":"Exception in get_settings","data":{"error":error_msg,"traceback":error_traceback},"timestamp":int(time.time()*1000)}) + '\n')
+        return jsonify({'error': f'Erreur lors de la récupération des settings: {error_msg}'}), 500
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+def interpolate_value(timestamp, data_array):
+    """
+    Interpolate value at given timestamp from sorted data array.
+    
+    Args:
+        timestamp: Target timestamp (datetime or ISO string)
+        data_array: List of dicts with 'time' and 'value' keys, sorted by time
+    
+    Returns:
+        Interpolated value or None if outside range
+    """
+    if not data_array or len(data_array) == 0:
+        return None
+    
+    # Convert timestamp to comparable format
+    from datetime import datetime
+    if isinstance(timestamp, str):
+        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+    
+    # Find surrounding points
+    for i in range(len(data_array) - 1):
+        time1 = data_array[i]['time']
+        time2 = data_array[i + 1]['time']
+        
+        if isinstance(time1, str):
+            time1 = datetime.fromisoformat(time1.replace('Z', '+00:00'))
+        if isinstance(time2, str):
+            time2 = datetime.fromisoformat(time2.replace('Z', '+00:00'))
+        
+        if time1 <= timestamp <= time2:
+            # Linear interpolation
+            value1 = data_array[i]['value']
+            value2 = data_array[i + 1]['value']
+            
+            if time1 == time2:
+                return value1
+            
+            ratio = (timestamp - time1).total_seconds() / (time2 - time1).total_seconds()
+            return value1 + (value2 - value1) * ratio
+    
+    # Outside range - return closest value
+    first_time = data_array[0]['time']
+    last_time = data_array[-1]['time']
+    
+    if isinstance(first_time, str):
+        first_time = datetime.fromisoformat(first_time.replace('Z', '+00:00'))
+    if isinstance(last_time, str):
+        last_time = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
+    
+    if timestamp < first_time:
+        return data_array[0]['value']
+    elif timestamp > last_time:
+        return data_array[-1]['value']
+    
+    return None
+
+def interpolate_position(timestamp, position_array):
+    """
+    Interpolate position (lat/lon) at given timestamp from sorted position array.
+    
+    Args:
+        timestamp: Target timestamp (datetime or ISO string)
+        position_array: List of dicts with 'time', 'lat', 'lon' keys, sorted by time
+    
+    Returns:
+        Dict with 'lat' and 'lon' or None if outside range
+    """
+    if not position_array or len(position_array) == 0:
+        return None
+    
+    # Convert timestamp to comparable format
+    from datetime import datetime
+    if isinstance(timestamp, str):
+        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+    
+    # Find surrounding points
+    for i in range(len(position_array) - 1):
+        time1 = position_array[i]['time']
+        time2 = position_array[i + 1]['time']
+        
+        if isinstance(time1, str):
+            time1 = datetime.fromisoformat(time1.replace('Z', '+00:00'))
+        if isinstance(time2, str):
+            time2 = datetime.fromisoformat(time2.replace('Z', '+00:00'))
+        
+        if time1 <= timestamp <= time2:
+            # Linear interpolation for both lat and lon
+            lat1 = position_array[i]['lat']
+            lon1 = position_array[i]['lon']
+            lat2 = position_array[i + 1]['lat']
+            lon2 = position_array[i + 1]['lon']
+            
+            if time1 == time2:
+                return {'lat': lat1, 'lon': lon1}
+            
+            ratio = (timestamp - time1).total_seconds() / (time2 - time1).total_seconds()
+            return {
+                'lat': lat1 + (lat2 - lat1) * ratio,
+                'lon': lon1 + (lon2 - lon1) * ratio
+            }
+    
+    # Outside range - return closest value
+    first_time = position_array[0]['time']
+    last_time = position_array[-1]['time']
+    
+    if isinstance(first_time, str):
+        first_time = datetime.fromisoformat(first_time.replace('Z', '+00:00'))
+    if isinstance(last_time, str):
+        last_time = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
+    
+    if timestamp < first_time:
+        return {'lat': position_array[0]['lat'], 'lon': position_array[0]['lon']}
+    elif timestamp > last_time:
+        return {'lat': position_array[-1]['lat'], 'lon': position_array[-1]['lon']}
+    
+    return None
+
+def calculate_position_from_distance_bearing(lat_ref, lon_ref, distance_m, bearing_deg):
+    """
+    Calculate new position from reference position using distance and bearing.
+    
+    Args:
+        lat_ref: Reference latitude in degrees
+        lon_ref: Reference longitude in degrees
+        distance_m: Distance in meters
+        bearing_deg: Bearing in degrees (0 = North, 90 = East)
+    
+    Returns:
+        (lat, lon) tuple in degrees
+    """
+    R = 6371000  # Earth radius in meters
+    
+    lat1 = math.radians(lat_ref)
+    lon1 = math.radians(lon_ref)
+    bearing = math.radians(bearing_deg)
+    
+    lat2 = math.asin(
+        math.sin(lat1) * math.cos(distance_m / R) +
+        math.cos(lat1) * math.sin(distance_m / R) * math.cos(bearing)
+    )
+    
+    lon2 = lon1 + math.atan2(
+        math.sin(bearing) * math.sin(distance_m / R) * math.cos(lat1),
+        math.cos(distance_m / R) - math.sin(lat1) * math.sin(lat2)
+    )
+    
+    return (math.degrees(lat2), math.degrees(lon2))
+
+@app.route('/api/run/<int:run_id>/usv_heading')
+def get_run_usv_heading(run_id):
+    """API endpoint to get USV Heading data for the time period of an AUV run."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # First, get the time range of the AUV run
+        cursor.execute("""
+            SELECT first_timestamp, last_timestamp
+            FROM log_files
+            WHERE id = %s AND vehicle_type = 'AUV'
+        """, (run_id,))
+        
+        run_info = cursor.fetchone()
+        if not run_info:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        start_time = run_info['first_timestamp']
+        end_time = run_info['last_timestamp']
+        
+        # Get USV Heading data for this time period
+        query = """
+            SELECT 
+                le.time,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type = 'Heading'
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, (start_time, end_time))
+        heading_data = cursor.fetchall()
+        
+        # Convert to list with ISO timestamps
+        result = []
+        for row in heading_data:
+            entry = dict(row)
+            if entry['time']:
+                entry['time'] = entry['time'].isoformat()
+            result.append(entry)
+        
+        return jsonify(result)
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/usbl/decoded_messages')
+def get_usbl_decoded_messages():
+    """API endpoint to get decoded USBL messages with pagination and filters."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Check if table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'usbl_decoded_messages'
+            ) as exists;
+        """)
+        table_exists = cursor.fetchone()['exists']
+        
+        if not table_exists:
+            return jsonify({
+                'entries': [],
+                'total': 0,
+                'page': 1,
+                'per_page': 100,
+                'pages': 0,
+                'message': 'Table usbl_decoded_messages does not exist. Please run database setup.'
+            })
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 100))
+        log_file_id = request.args.get('log_file_id', '')
+        direction = request.args.get('direction', '')
+        message_id = request.args.get('message_id', '')
+        message_name = request.args.get('message_name', '')
+        start_time = request.args.get('start_time', '')
+        end_time = request.args.get('end_time', '')
+        
+        offset = (page - 1) * per_page
+        
+        query = """
+            SELECT 
+                udm.*,
+                lf.filename AS log_filename,
+                lf.vehicle_type,
+                lf.vehicle_id
+            FROM usbl_decoded_messages udm
+            JOIN log_files lf ON lf.id = udm.log_file_id
+            WHERE 1=1
+        """
+        count_query = """
+            SELECT COUNT(*) as total
+            FROM usbl_decoded_messages udm
+            WHERE 1=1
+        """
+        params = []
+        count_params = []
+        
+        if log_file_id:
+            query += " AND udm.log_file_id = %s"
+            count_query += " AND udm.log_file_id = %s"
+            params.append(log_file_id)
+            count_params.append(log_file_id)
+        
+        if direction:
+            query += " AND udm.direction = %s"
+            count_query += " AND udm.direction = %s"
+            params.append(direction)
+            count_params.append(direction)
+        
+        if message_id:
+            query += " AND udm.message_id = %s"
+            count_query += " AND udm.message_id = %s"
+            params.append(message_id)
+            count_params.append(message_id)
+        
+        if message_name:
+            query += " AND udm.message_name ILIKE %s"
+            count_query += " AND udm.message_name ILIKE %s"
+            params.append(f'%{message_name}%')
+            count_params.append(f'%{message_name}%')
+        
+        if start_time:
+            query += " AND udm.timestamp >= %s"
+            count_query += " AND udm.timestamp >= %s"
+            params.append(start_time)
+            count_params.append(start_time)
+        
+        if end_time:
+            query += " AND udm.timestamp <= %s"
+            count_query += " AND udm.timestamp <= %s"
+            params.append(end_time)
+            count_params.append(end_time)
+        
+        query += " ORDER BY udm.timestamp DESC LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+        
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()['total']
+        
+        cursor.execute(query, params)
+        entries = cursor.fetchall()
+        
+        # Convert to dict and format timestamps
+        entries_list = []
+        for entry in entries:
+            entry_dict = dict(entry)
+            if entry_dict.get('timestamp'):
+                entry_dict['timestamp'] = entry_dict['timestamp'].isoformat()
+            if entry_dict.get('created_at'):
+                entry_dict['created_at'] = entry_dict['created_at'].isoformat()
+            entries_list.append(entry_dict)
+        
+        return jsonify({
+            'entries': entries_list,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Return empty result on error
+        # Get per_page from request if available, otherwise default
+        per_page_default = int(request.args.get('per_page', 100))
+        return jsonify({
+            'entries': [],
+            'total': 0,
+            'page': 1,
+            'per_page': per_page_default,
+            'pages': 0,
+            'error': str(e)
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/usbl/log_files')
+def get_usbl_log_files():
+    """API endpoint to get list of USBL log files."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Check if table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'usbl_decoded_messages'
+            ) as exists;
+        """)
+        table_exists = cursor.fetchone()['exists']
+        
+        if table_exists:
+            cursor.execute("""
+                SELECT 
+                    lf.id, 
+                    lf.filename, 
+                    lf.vehicle_id, 
+                    lf.first_timestamp, 
+                    lf.last_timestamp,
+                    lf.file_path,
+                    COUNT(udm.id) as decoded_count
+                FROM log_files lf
+                LEFT JOIN usbl_decoded_messages udm ON udm.log_file_id = lf.id
+                WHERE lf.filename LIKE '%usbl%' AND lf.import_status IN ('completed', 'failed')
+                GROUP BY lf.id, lf.filename, lf.vehicle_id, lf.first_timestamp, lf.last_timestamp, lf.file_path
+                ORDER BY COALESCE(lf.first_timestamp, lf.import_started_at, '1970-01-01'::timestamp) DESC
+            """)
+        else:
+            # Table doesn't exist, return files without decoded count
+            cursor.execute("""
+                SELECT 
+                    lf.id, 
+                    lf.filename, 
+                    lf.vehicle_id, 
+                    lf.first_timestamp, 
+                    lf.last_timestamp,
+                    lf.file_path,
+                    0 as decoded_count
+                FROM log_files lf
+                WHERE lf.filename LIKE '%usbl%' AND lf.import_status IN ('completed', 'failed')
+                ORDER BY COALESCE(lf.first_timestamp, lf.import_started_at, '1970-01-01'::timestamp) DESC
+            """)
+        
+        files = cursor.fetchall()
+        
+        files_list = []
+        for file in files:
+            file_dict = dict(file)
+            # Handle None timestamps
+            if file_dict.get('first_timestamp'):
+                file_dict['first_timestamp'] = file_dict['first_timestamp'].isoformat()
+            else:
+                file_dict['first_timestamp'] = None
+            if file_dict.get('last_timestamp'):
+                file_dict['last_timestamp'] = file_dict['last_timestamp'].isoformat()
+            else:
+                file_dict['last_timestamp'] = None
+            files_list.append(file_dict)
+        
+        return jsonify(files_list)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Return empty list on error instead of error object to avoid breaking forEach
+        return jsonify([])
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/usbl/decode/<int:log_file_id>', methods=['POST'])
+def decode_usbl_file(log_file_id):
+    """API endpoint to decode an already imported USBL file."""
+    from database.import_logs import import_usbl_file
+    import threading
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Check if file exists and is a USBL file
+        cursor.execute("""
+            SELECT id, filename, file_path, import_status
+            FROM log_files
+            WHERE id = %s AND filename LIKE '%%usbl%%'
+        """, (log_file_id,))
+        file_info = cursor.fetchone()
+        
+        if not file_info:
+            return jsonify({'error': 'File not found or not a USBL file'}), 404
+        
+        # Allow decoding even if import failed (might have failed due to missing table)
+        if file_info['import_status'] not in ['completed', 'failed']:
+            return jsonify({'error': 'File import not completed or failed'}), 400
+        
+        # Delete existing decoded messages and log entries for this file
+        cursor.execute("DELETE FROM usbl_decoded_messages WHERE log_file_id = %s", (log_file_id,))
+        # Also delete existing USBL log entries to avoid duplicates
+        cursor.execute("""
+            DELETE FROM log_entries 
+            WHERE log_file_id = %s 
+            AND data_type_id IN (
+                SELECT id FROM data_type_catalog 
+                WHERE data_type IN ('USBL_Distance', 'USBL_Bearing', 'USBL_Elevation', 'USBL_SNR')
+            )
+        """, (log_file_id,))
+        conn.commit()
+        
+        # Import the decoder functions
+        from antenna_driver_analysis.kogger_usbl_decoder import (
+            decode_usbl_message_from_csv,
+            parse_bytes_from_string,
+            reassemble_received_messages,
+            parse_message
+        )
+        from psycopg2.extras import execute_values
+        
+        # Get vehicle info from log_file
+        cursor.execute("SELECT vehicle_type, vehicle_id FROM log_files WHERE id = %s", (log_file_id,))
+        file_info_extended = cursor.fetchone()
+        vehicle_type = file_info_extended['vehicle_type']
+        vehicle_id = file_info_extended['vehicle_id']
+        
+        # Get or create data types for USBL values
+        usbl_data_types = {
+            'USBL_Bearing': 'acoustic',
+            'USBL_Elevation': 'acoustic',
+            'USBL_Distance': 'acoustic',
+            'USBL_SNR': 'acoustic'
+        }
+        data_type_ids = {}
+        for data_type_name, category in usbl_data_types.items():
+            cursor.execute("""
+                SELECT id FROM data_type_catalog WHERE data_type = %s AND vehicle_type = %s
+            """, (data_type_name, vehicle_type))
+            result = cursor.fetchone()
+            if result:
+                data_type_ids[data_type_name] = result['id']
+            else:
+                cursor.execute("""
+                    INSERT INTO data_type_catalog (data_type, vehicle_type, category)
+                    VALUES (%s, %s, %s)
+                    RETURNING id
+                """, (data_type_name, vehicle_type, category))
+                data_type_ids[data_type_name] = cursor.fetchone()['id']
+                conn.commit()
+        
+        decoded_messages = []
+        log_entries = []
+        received_buffer = b''
+        last_direction = None
+        
+        # First, try to read from usbl_raw_data table (preferred method)
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM usbl_raw_data WHERE log_file_id = %s
+        """, (log_file_id,))
+        raw_data_count = cursor.fetchone()['count']
+        
+        if raw_data_count > 0:
+            # Read from database
+            cursor.execute("""
+                SELECT timestamp, direction, data_raw
+                FROM usbl_raw_data
+                WHERE log_file_id = %s
+                ORDER BY timestamp ASC
+            """, (log_file_id,))
+            raw_rows = cursor.fetchall()
+            
+            for row in raw_rows:
+                timestamp = row['timestamp']
+                direction = row['direction']
+                data_str = row['data_raw']
+                
+                # Handle direction change - reset buffer
+                if direction != last_direction:
+                    received_buffer = b''
+                last_direction = direction
+                
+                # Parse data bytes
+                data_bytes = parse_bytes_from_string(data_str)
+                if data_bytes is None:
+                    # Store error message
+                    decoded_messages.append((
+                        log_file_id,
+                        timestamp,
+                        direction,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        f"Error: Could not parse data literal: {data_str}",
+                        data_str,
+                        None,
+                        None,  # distance
+                        None,  # bearing
+                        None,  # elevation
+                        None,  # snr
+                        None,  # device_id
+                    ))
+                    continue
+                
+                # Process SENT messages (complete)
+                if direction == 'SENT':
+                    timestamp_str = timestamp.isoformat()
+                    decoded = decode_usbl_message_from_csv(timestamp_str, direction, data_str)
+                    if decoded:
+                        decoded_messages.append((
+                            log_file_id,
+                            timestamp,
+                            direction,
+                            decoded.get('message_id'),
+                            decoded.get('message_name'),
+                            decoded.get('message_type'),
+                            decoded.get('version'),
+                            decoded.get('device_address'),
+                            decoded.get('payload_decoded', ''),
+                            decoded.get('payload_raw', ''),
+                            decoded.get('length'),
+                            # Extracted values
+                            decoded.get('distance'),
+                            decoded.get('bearing') or decoded.get('azimuth'),
+                            decoded.get('elevation'),
+                            decoded.get('snr'),
+                            decoded.get('device_id'),
+                        ))
+                        
+                        # Extract USBL values from ID_USBL_SOLUTION messages (SENT)
+                        if decoded.get('message_name') == 'ID_USBL_SOLUTION' and decoded.get('distance') is not None:
+                            # Store distance
+                            if decoded.get('distance') > 0:
+                                log_entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_Distance'],
+                                    float(decoded['distance']),
+                                    log_file_id
+                                ))
+                            
+                            # Store bearing (azimuth)
+                            if decoded.get('azimuth') is not None:
+                                log_entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_Bearing'],
+                                    float(decoded['azimuth']),
+                                    log_file_id
+                                ))
+                            
+                            # Store elevation
+                            if decoded.get('elevation') is not None:
+                                log_entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_Elevation'],
+                                    float(decoded['elevation']),
+                                    log_file_id
+                                ))
+                            
+                            # Store SNR
+                            if decoded.get('snr') is not None:
+                                log_entries.append((
+                                    timestamp,
+                                    vehicle_type,
+                                    vehicle_id,
+                                    data_type_ids['USBL_SNR'],
+                                    float(decoded['snr']),
+                                    log_file_id
+                                ))
+                
+                # Process RECEIVED messages (may need reassembly)
+                elif direction == 'RECEIVED':
+                    complete_messages, received_buffer = reassemble_received_messages(data_bytes, received_buffer)
+                    
+                    for msg_bytes in complete_messages:
+                        decoded = parse_message(msg_bytes)
+                        if decoded:
+                            decoded_messages.append((
+                                log_file_id,
+                                timestamp,
+                                direction,
+                                decoded.get('message_id'),
+                                decoded.get('message_name'),
+                                decoded.get('message_type'),
+                                decoded.get('version'),
+                                decoded.get('device_address'),
+                                decoded.get('payload_decoded', ''),
+                                decoded.get('payload_raw', ''),
+                                decoded.get('length'),
+                                # Extracted values
+                                decoded.get('distance'),
+                                decoded.get('bearing') or decoded.get('azimuth'),
+                                decoded.get('elevation'),
+                                decoded.get('snr'),
+                                decoded.get('device_id'),
+                            ))
+                            
+                            # Extract USBL values from ID_USBL_SOLUTION messages
+                            if decoded.get('message_name') == 'ID_USBL_SOLUTION' and decoded.get('distance') is not None:
+                                # Store distance
+                                if decoded.get('distance') > 0:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Distance'],
+                                        float(decoded['distance']),
+                                        log_file_id
+                                    ))
+                                
+                                # Store bearing (azimuth)
+                                if decoded.get('azimuth') is not None:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Bearing'],
+                                        float(decoded['azimuth']),
+                                        log_file_id
+                                    ))
+                                
+                                # Store elevation
+                                if decoded.get('elevation') is not None:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Elevation'],
+                                        float(decoded['elevation']),
+                                        log_file_id
+                                    ))
+                                
+                                # Store SNR
+                                if decoded.get('snr') is not None:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_SNR'],
+                                        float(decoded['snr']),
+                                        log_file_id
+                                    ))
+                
+                # Bulk insert every 1000 messages
+                if len(decoded_messages) >= 1000:
+                    execute_values(cursor, """
+                        INSERT INTO usbl_decoded_messages 
+                        (log_file_id, timestamp, direction, message_id, message_name, message_type, 
+                         version, device_address, payload_decoded, payload_raw, length,
+                         distance, bearing, elevation, snr, device_id)
+                        VALUES %s
+                    """, decoded_messages, page_size=1000)
+                    conn.commit()
+                    decoded_messages = []
+                
+                # Bulk insert log entries every 1000 entries
+                if len(log_entries) >= 1000:
+                    execute_values(cursor, """
+                        INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
+                        VALUES %s
+                    """, log_entries, page_size=1000)
+                    conn.commit()
+                    log_entries = []
+        else:
+            # Fallback: read from file (for old imports without raw data)
+            file_path = file_info['file_path']
+            filename = file_info['filename']
+            
+            # Check if file exists on disk
+            if not os.path.exists(file_path):
+                # Try to find file in logs directory
+                import glob
+                logs_path = os.path.join('logs', filename)
+                if os.path.exists(logs_path):
+                    file_path = logs_path
+                else:
+                    # Try recursive search in logs directory
+                    found_files = glob.glob(f'logs/**/{filename}', recursive=True)
+                    if found_files:
+                        file_path = found_files[0]
+                    else:
+                        return jsonify({
+                            'error': f'File not found on disk and no raw data in database. Original path: {file_path}. Please re-import the file.'
+                        }), 404
+            
+            import pandas as pd
+            
+            # Read and decode the file
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    parts = line.strip().split(',', 2)
+                    if len(parts) < 3:
+                        continue
+                    
+                    timestamp_str = parts[0].strip()
+                    direction = parts[1].strip()
+                    data_str = ','.join(parts[2:])
+                    
+                    # Parse timestamp
+                    try:
+                        timestamp = pd.to_datetime(timestamp_str, errors='coerce')
+                        if pd.isna(timestamp) or timestamp.year < 2000 or timestamp.year > 2100:
+                            continue
+                    except:
+                        continue
+                    
+                    # Handle direction change - reset buffer
+                    if direction != last_direction:
+                        received_buffer = b''
+                    last_direction = direction
+                    
+                    # Parse data bytes
+                    data_bytes = parse_bytes_from_string(data_str)
+                    if data_bytes is None:
+                        # Store error message
+                        decoded_messages.append((
+                            log_file_id,
+                            timestamp,
+                            direction,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            f"Error: Could not parse data literal: {data_str}",
+                            data_str,
+                            None,
+                            None,  # distance
+                            None,  # bearing
+                            None,  # elevation
+                            None,  # snr
+                            None,  # device_id
+                        ))
+                        continue
+                    
+                    # Process SENT messages (complete)
+                    if direction == 'SENT':
+                        decoded = decode_usbl_message_from_csv(timestamp_str, direction, data_str)
+                        if decoded:
+                            decoded_messages.append((
+                                log_file_id,
+                                timestamp,
+                                direction,
+                                decoded.get('message_id'),
+                                decoded.get('message_name'),
+                                decoded.get('message_type'),
+                                decoded.get('version'),
+                                decoded.get('device_address'),
+                                decoded.get('payload_decoded', ''),
+                                decoded.get('payload_raw', ''),
+                                decoded.get('length'),
+                                # Extracted values
+                                decoded.get('distance'),
+                                decoded.get('bearing') or decoded.get('azimuth'),
+                                decoded.get('elevation'),
+                                decoded.get('snr'),
+                                decoded.get('device_id'),
+                            ))
+                            
+                            # Extract USBL values from ID_USBL_SOLUTION messages (SENT)
+                            if decoded.get('message_name') == 'ID_USBL_SOLUTION' and decoded.get('distance') is not None:
+                                # Store distance
+                                if decoded.get('distance') > 0:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Distance'],
+                                        float(decoded['distance']),
+                                        log_file_id
+                                    ))
+                                
+                                # Store bearing (azimuth)
+                                if decoded.get('azimuth') is not None:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Bearing'],
+                                        float(decoded['azimuth']),
+                                        log_file_id
+                                    ))
+                                
+                                # Store elevation
+                                if decoded.get('elevation') is not None:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_Elevation'],
+                                        float(decoded['elevation']),
+                                        log_file_id
+                                    ))
+                                
+                                # Store SNR
+                                if decoded.get('snr') is not None:
+                                    log_entries.append((
+                                        timestamp,
+                                        vehicle_type,
+                                        vehicle_id,
+                                        data_type_ids['USBL_SNR'],
+                                        float(decoded['snr']),
+                                        log_file_id
+                                    ))
+                    
+                    # Process RECEIVED messages (may need reassembly)
+                    elif direction == 'RECEIVED':
+                        complete_messages, received_buffer = reassemble_received_messages(data_bytes, received_buffer)
+                        
+                        for msg_bytes in complete_messages:
+                            decoded = parse_message(msg_bytes)
+                            if decoded:
+                                decoded_messages.append((
+                                    log_file_id,
+                                    timestamp,
+                                    direction,
+                                    decoded.get('message_id'),
+                                    decoded.get('message_name'),
+                                    decoded.get('message_type'),
+                                    decoded.get('version'),
+                                    decoded.get('device_address'),
+                                    decoded.get('payload_decoded', ''),
+                                    decoded.get('payload_raw', ''),
+                                    decoded.get('length'),
+                                    # Extracted values
+                                    decoded.get('distance'),
+                                    decoded.get('bearing') or decoded.get('azimuth'),
+                                    decoded.get('elevation'),
+                                    decoded.get('snr'),
+                                    decoded.get('device_id'),
+                                ))
+                                
+                                # Extract USBL values from ID_USBL_SOLUTION messages (RECEIVED)
+                                if decoded.get('message_name') == 'ID_USBL_SOLUTION' and decoded.get('distance') is not None:
+                                    # Store distance
+                                    if decoded.get('distance') > 0:
+                                        log_entries.append((
+                                            timestamp,
+                                            vehicle_type,
+                                            vehicle_id,
+                                            data_type_ids['USBL_Distance'],
+                                            float(decoded['distance']),
+                                            log_file_id
+                                        ))
+                                    
+                                    # Store bearing (azimuth)
+                                    if decoded.get('azimuth') is not None:
+                                        log_entries.append((
+                                            timestamp,
+                                            vehicle_type,
+                                            vehicle_id,
+                                            data_type_ids['USBL_Bearing'],
+                                            float(decoded['azimuth']),
+                                            log_file_id
+                                        ))
+                                    
+                                    # Store elevation
+                                    if decoded.get('elevation') is not None:
+                                        log_entries.append((
+                                            timestamp,
+                                            vehicle_type,
+                                            vehicle_id,
+                                            data_type_ids['USBL_Elevation'],
+                                            float(decoded['elevation']),
+                                            log_file_id
+                                        ))
+                                    
+                                    # Store SNR
+                                    if decoded.get('snr') is not None:
+                                        log_entries.append((
+                                            timestamp,
+                                            vehicle_type,
+                                            vehicle_id,
+                                            data_type_ids['USBL_SNR'],
+                                            float(decoded['snr']),
+                                            log_file_id
+                                        ))
+                    
+                    # Bulk insert every 1000 messages
+                    if len(decoded_messages) >= 1000:
+                        execute_values(cursor, """
+                            INSERT INTO usbl_decoded_messages 
+                            (log_file_id, timestamp, direction, message_id, message_name, message_type, 
+                             version, device_address, payload_decoded, payload_raw, length,
+                             distance, bearing, elevation, snr, device_id)
+                            VALUES %s
+                        """, decoded_messages, page_size=1000)
+                        conn.commit()
+                        decoded_messages = []
+                    
+                    # Bulk insert log entries every 1000 entries
+                    if len(log_entries) >= 1000:
+                        execute_values(cursor, """
+                            INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
+                            VALUES %s
+                        """, log_entries, page_size=1000)
+                        conn.commit()
+                        log_entries = []
+        
+        # Final bulk insert decoded messages
+        if decoded_messages:
+            execute_values(cursor, """
+                INSERT INTO usbl_decoded_messages 
+                (log_file_id, timestamp, direction, message_id, message_name, message_type, 
+                 version, device_address, payload_decoded, payload_raw, length,
+                 distance, bearing, elevation, snr, device_id)
+                VALUES %s
+            """, decoded_messages, page_size=1000)
+            conn.commit()
+        
+        # Final bulk insert log entries
+        if log_entries:
+            execute_values(cursor, """
+                INSERT INTO log_entries (time, vehicle_type, vehicle_id, data_type_id, value, log_file_id)
+                VALUES %s
+            """, log_entries, page_size=1000)
+            conn.commit()
+        
+        # Count decoded messages
+        cursor.execute("SELECT COUNT(*) as count FROM usbl_decoded_messages WHERE log_file_id = %s", (log_file_id,))
+        count = cursor.fetchone()['count']
+        
+        # Count log entries created
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM log_entries 
+            WHERE log_file_id = %s AND data_type_id IN %s
+        """, (log_file_id, tuple(data_type_ids.values())))
+        log_entries_count = cursor.fetchone()['count']
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'File decoded successfully. {count} messages decoded, {log_entries_count} USBL values extracted.',
+            'decoded_count': count,
+            'log_entries_count': log_entries_count
+        })
+        
+    except Exception as e:
+        conn.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/run/<int:run_id>/auv_calculated_position')
+def get_run_auv_calculated_position(run_id):
+    """API endpoint to calculate AUV positions from USV full data, USV heading, USV position, and AUV depth."""
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # First, get the time range of the AUV run
+        cursor.execute("""
+            SELECT first_timestamp, last_timestamp
+            FROM log_files
+            WHERE id = %s AND vehicle_type = 'AUV'
+        """, (run_id,))
+        
+        run_info = cursor.fetchone()
+        if not run_info:
+            return jsonify({'error': 'Run not found'}), 404
+        
+        start_time = run_info['first_timestamp']
+        end_time = run_info['last_timestamp']
+        
+        # Get USV full AUV data (distance and bearing)
+        query = """
+            SELECT 
+                le.time,
+                dtc.data_type,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'AUV'
+              AND dtc.data_type IN ('USV_FULL_AUV_Distance', 'USV_FULL_AUV_Bearing')
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC, dtc.data_type ASC
+        """
+        cursor.execute(query, (start_time, end_time))
+        usv_full_data = cursor.fetchall()
+        
+        # Group by distance and bearing
+        distance_data = []
+        bearing_data = []
+        for row in usv_full_data:
+            entry = {
+                'time': row['time'].isoformat() if row['time'] else None,
+                'value': row['value']
+            }
+            if row['data_type'] == 'USV_FULL_AUV_Distance':
+                distance_data.append(entry)
+            elif row['data_type'] == 'USV_FULL_AUV_Bearing':
+                bearing_data.append(entry)
+        
+        # Get USV heading data
+        query = """
+            SELECT 
+                le.time,
+                le.value
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type = 'Heading'
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, (start_time, end_time))
+        heading_data = cursor.fetchall()
+        usv_heading = [{'time': row['time'].isoformat() if row['time'] else None, 'value': row['value']} for row in heading_data]
+        
+        # Get USV position data (lat/lon)
+        query_lat = """
+            SELECT 
+                le.time,
+                le.value as lat_raw
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type = 'GPS_RAW_INT_lat'
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query_lat, (start_time, end_time))
+        lat_data = cursor.fetchall()
+        
+        query_lon = """
+            SELECT 
+                le.time,
+                le.value as lon_raw
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.vehicle_type = 'USV'
+              AND dtc.data_type = 'GPS_RAW_INT_lon'
+              AND le.time >= %s
+              AND le.time <= %s
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query_lon, (start_time, end_time))
+        lon_data = cursor.fetchall()
+        
+        # Combine lat and lon by matching closest timestamps
+        usv_position = []
+        lon_idx = 0
+        for lat_row in lat_data:
+            lat_time = lat_row['time']
+            lat_raw = lat_row['lat_raw']
+            
+            if not lat_time:
+                continue
+            
+            lat_epoch = lat_time.timestamp()
+            
+            # Find closest lon point
+            best_lon = None
+            best_diff = float('inf')
+            
+            for i in range(lon_idx, len(lon_data)):
+                lon_row = lon_data[i]
+                lon_time = lon_row['time']
+                lon_raw = lon_row['lon_raw']
+                
+                if not lon_time:
+                    continue
+                
+                lon_epoch = lon_time.timestamp()
+                diff = abs(lat_epoch - lon_epoch)
+                
+                if diff > best_diff and i > lon_idx:
+                    break
+                    
+                if diff < best_diff:
+                    best_diff = diff
+                    best_lon = (lon_time, lon_raw)
+                    lon_idx = i
+            
+            # Check backwards a bit
+            for i in range(max(0, lon_idx - 10), lon_idx):
+                lon_row = lon_data[i]
+                lon_time = lon_row['time']
+                lon_raw = lon_row['lon_raw']
+                
+                if not lon_time:
+                    continue
+                
+                lon_epoch = lon_time.timestamp()
+                diff = abs(lat_epoch - lon_epoch)
+                
+                if diff < best_diff:
+                    best_diff = diff
+                    best_lon = (lon_time, lon_raw)
+            
+            # Only include if we found a match within 1 second
+            if best_lon and best_diff < 1.0:
+                lon_time, lon_raw = best_lon
+                # Check for None values and format (GPS_RAW_INT vs degrees)
+                # Lat and Lon can be in different formats, so check each independently
+                if lat_raw is not None and lon_raw is not None:
+                    # Convert lat independently
+                    if abs(lat_raw) > 1e6:
+                        # GPS_RAW_INT format: divide by 1e7
+                        lat_degrees = lat_raw / 1e7
+                    else:
+                        # Already in degrees
+                        lat_degrees = lat_raw
+                    
+                    # Convert lon independently (may be different format than lat!)
+                    if abs(lon_raw) > 1e6:
+                        # GPS_RAW_INT format: divide by 1e7
+                        lon_degrees = lon_raw / 1e7
+                    else:
+                        # Already in degrees
+                        lon_degrees = lon_raw
+                    
+                    usv_position.append({
+                        'time': lat_time.isoformat(),
+                        'lat': lat_degrees,
+                        'lon': lon_degrees
+                    })
+        
+        # Get AUV depth data
+        query = """
+            SELECT 
+                le.time,
+                le.value as depth
+            FROM log_entries le
+            JOIN data_type_catalog dtc ON dtc.id = le.data_type_id
+            WHERE le.log_file_id = %s
+              AND dtc.data_type = 'Depth'
+            ORDER BY le.time ASC
+        """
+        cursor.execute(query, (run_id,))
+        depth_data = cursor.fetchall()
+        auv_depth = [{'time': row['time'].isoformat() if row['time'] else None, 'value': row['depth']} for row in depth_data]
+        # Ensure depth data is sorted by time (required for interpolation)
+        auv_depth.sort(key=lambda x: x['time'] if x['time'] else '')
+        
+        # Calculate AUV positions
+        result = []
+        
+        # Match distance and bearing by timestamp (they should be synchronized)
+        distance_dict = {d['time']: d['value'] for d in distance_data if d['time']}
+        bearing_dict = {b['time']: b['value'] for b in bearing_data if b['time']}
+        
+        # Get all timestamps that have both distance and bearing
+        common_timestamps = set(distance_dict.keys()) & set(bearing_dict.keys())
+        
+        for timestamp_str in sorted(common_timestamps):
+            distance = distance_dict[timestamp_str]
+            bearing = bearing_dict[timestamp_str]
+            
+            # Interpolate USV heading
+            usv_heading_value = interpolate_value(timestamp_str, usv_heading)
+            if usv_heading_value is None:
+                continue
+            
+            # Interpolate USV position
+            usv_pos = interpolate_position(timestamp_str, usv_position)
+            if usv_pos is None:
+                continue
+            
+            # Interpolate AUV depth
+            depth_value = interpolate_value(timestamp_str, auv_depth)
+            # Accept negative depth values (AUV can be above surface) but reject None
+            if depth_value is None:
+                continue
+            
+            # Calculate horizontal distance (Pythagorean theorem)
+            # Use absolute value of depth (depth can be negative if AUV is above surface)
+            # Note: Distance might be in decimeters, so divide by 10 to convert to meters
+            distance_m = distance / 10.0
+            depth_abs = abs(depth_value)
+            if distance_m <= depth_abs:
+                # Invalid: distance should be >= depth
+                continue
+            
+            horizontal_distance = math.sqrt(distance_m * distance_m - depth_abs * depth_abs)
+            
+            # Calculate absolute direction (USV heading - USBL bearing)
+            # Note: Bearing is typically defined relative to USV heading, may need subtraction
+            absolute_bearing = (usv_heading_value - bearing) % 360
+            if absolute_bearing < 0:
+                absolute_bearing += 360
+            
+            # Calculate AUV position from USV position
+            auv_lat, auv_lon = calculate_position_from_distance_bearing(
+                usv_pos['lat'], usv_pos['lon'],
+                horizontal_distance,
+                absolute_bearing
+            )
+            
+            result.append({
+                'time': timestamp_str,
+                'lat': auv_lat,
+                'lon': auv_lon
+            })
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
         
     finally:
         cursor.close()

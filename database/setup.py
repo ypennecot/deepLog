@@ -220,7 +220,7 @@ def setup_schema():
             CREATE TABLE IF NOT EXISTS vehicle_settings (
                 id SERIAL PRIMARY KEY,
                 settings_file_id INTEGER NOT NULL REFERENCES settings_files(id) ON DELETE CASCADE,
-                setting_name VARCHAR(200) NOT NULL,
+                setting_name VARCHAR(500) NOT NULL,
                 setting_value TEXT NOT NULL,
                 value_type VARCHAR(20),
                 category VARCHAR(50),
@@ -242,6 +242,67 @@ def setup_schema():
         """)
         conn.commit()
         print("✓ vehicle_settings table created")
+        
+        # 6. Create usbl_decoded_messages table
+        print("Creating usbl_decoded_messages table...")
+        # Create usbl_raw_data table to store raw CSV lines before decoding
+        print("Creating usbl_raw_data table...")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usbl_raw_data (
+                id SERIAL PRIMARY KEY,
+                log_file_id INTEGER NOT NULL REFERENCES log_files(id) ON DELETE CASCADE,
+                timestamp TIMESTAMPTZ NOT NULL,
+                direction VARCHAR(10) NOT NULL CHECK (direction IN ('SENT', 'RECEIVED')),
+                data_raw TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_usbl_raw_data_log_file_id ON usbl_raw_data(log_file_id);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_usbl_raw_data_timestamp ON usbl_raw_data(timestamp DESC);
+        """)
+        conn.commit()
+        print("✓ usbl_raw_data table created")
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usbl_decoded_messages (
+                id SERIAL PRIMARY KEY,
+                log_file_id INTEGER NOT NULL REFERENCES log_files(id) ON DELETE CASCADE,
+                timestamp TIMESTAMPTZ NOT NULL,
+                direction VARCHAR(10) NOT NULL CHECK (direction IN ('SENT', 'RECEIVED')),
+                message_id INTEGER,
+                message_name VARCHAR(100),
+                message_type VARCHAR(20),
+                version INTEGER,
+                device_address INTEGER,
+                payload_decoded TEXT,
+                payload_raw TEXT,
+                length INTEGER,
+                -- Extracted values from ID_USBL_SOLUTION messages
+                distance DOUBLE PRECISION,
+                bearing DOUBLE PRECISION,
+                elevation DOUBLE PRECISION,
+                snr DOUBLE PRECISION,
+                device_id INTEGER,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_usbl_decoded_log_file_id ON usbl_decoded_messages(log_file_id);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_usbl_decoded_timestamp ON usbl_decoded_messages(timestamp);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_usbl_decoded_message_id ON usbl_decoded_messages(message_id);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_usbl_decoded_direction ON usbl_decoded_messages(direction);
+        """)
+        conn.commit()
+        print("✓ usbl_decoded_messages table created")
         
         # Set up compression policy (optional - requires columnstore to be enabled)
         # For now, we'll skip compression policy as it requires additional configuration

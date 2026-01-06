@@ -533,6 +533,7 @@
             <span class="time-range-separator">→</span>
             <span id="time-range-end" class="time-range-value">--:--:--</span>
             <span class="time-range-duration">(<span id="time-range-duration">--</span>)</span>
+            <button id="reset-time" style="margin-left: 15px; padding: 6px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500;">Réinitialiser le temps</button>
         </div>
         <div class="time-range-stats">
             <div class="stat-item">
@@ -592,7 +593,31 @@
         </div>
         
         <div class="panel">
-            <h2>Position USV</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 style="margin: 0;">Trajectoires</h2>
+            </div>
+            <div class="derived-controls">
+                <label>
+                    <input type="checkbox" id="show-usv-trajectory" checked>
+                    <span class="derived-color-indicator" style="background: #007bff;"></span>
+                    Trajectoire USV
+                </label>
+                <label>
+                    <input type="checkbox" id="show-auv-trajectory" checked>
+                    <span class="derived-color-indicator" style="background: #28a745;"></span>
+                    Trajectoire AUV
+                </label>
+                <label>
+                    <input type="checkbox" id="show-usv-heading">
+                    <span class="derived-color-indicator" style="background: #ffc107;"></span>
+                    Heading USV
+                </label>
+                <label>
+                    <input type="checkbox" id="show-usbl-bearing">
+                    <span class="derived-color-indicator" style="background: #dc3545;"></span>
+                    Bearing USBL
+                </label>
+            </div>
             <div id="map"></div>
         </div>
         
@@ -779,6 +804,7 @@
         let depthDataFull = [];
         let motorDataFull = {}; // Object with keys: 'M1', 'M2', ..., 'M8'
         let usvPositionDataFull = [];
+        let auvPositionDataFull = []; // Calculated AUV position data
         let stateDataFull = []; // StateNb data (AUV)
         let usvStateDataFull = []; // StateNb data (USV)
         let usvOrderDataFull = []; // Order to AUV data (USV)
@@ -794,8 +820,16 @@
         let usblDistanceData = []; // Filtered USBL distance data
         let usvFullAuvDataFull = {distance: [], bearing: [], elevation: [], state: []}; // USV full AUV data
         let usvFullAuvData = {distance: [], bearing: [], elevation: [], state: []}; // Filtered USV full AUV data
+        let usvHeadingDataFull = []; // USV heading data (full)
+        let usvHeadingData = []; // Filtered USV heading data
         let usvOrderStringToInt = {}; // Mapping string -> int for Order to AUV
         let usvOrderIntToString = {}; // Mapping int -> string for Order to AUV (reverse)
+        
+        // Run settings (for altitude reference lines)
+        let runSettings = {
+            minAltitudeStartBreak: null,
+            minAltitudeFullReverse: null
+        };
         
         // Display time range (controls what is shown on all graphs)
         let displayStartTime = null; // First timestamp of AUV log
@@ -818,6 +852,7 @@
         let depthData = [];
         let motorData = {};
         let usvPositionData = [];
+        let auvPositionData = []; // Filtered calculated AUV position data
         let stateData = []; // Filtered StateNb data (AUV)
         let usvStateData = []; // Filtered StateNb data (USV)
         let usvOrderData = []; // Filtered Order to AUV data (USV)
@@ -871,6 +906,12 @@
         let showAltitudeOA = true;
         let showAltitudeOAFilt = true;
         let showTargetAltitude = true;
+        
+        // Trajectory visibility
+        let showUsvTrajectory = true;
+        let showAuvTrajectory = true;
+        let showUsvHeading = false; // Heading USV vectors visibility
+        let showUsblBearing = false; // USBL bearing vectors visibility
         
         // Derived data storage
         let derivedData = {
@@ -1175,8 +1216,13 @@
         // Map setup
         let map = null;
         let usvTrajectory = null;
+        let auvTrajectory = null;
         let usvMarker = null;
         window.usvMarker = usvMarker;
+        let usvMarkers = []; // Array to store USV position markers
+        let auvMarkers = []; // Array to store AUV position markers
+        let usvHeadingVectors = []; // Array to store USV heading vectors
+        let usblBearingVectors = []; // Array to store USBL bearing vectors
         
         // ============================================
         // UTILITY FUNCTIONS
@@ -1229,6 +1275,94 @@
                 }
             });
             return result;
+        }
+        
+        // Interpolate USV heading at a given time
+        function interpolateUSVHeading(targetTime) {
+            if (!usvHeadingData || usvHeadingData.length === 0) {
+                return null;
+            }
+            
+            const targetTimeMs = new Date(targetTime).getTime();
+            
+            // Find the two closest points
+            let before = null;
+            let after = null;
+            
+            for (let i = 0; i < usvHeadingData.length; i++) {
+                const pointTime = new Date(usvHeadingData[i].time).getTime();
+                if (pointTime <= targetTimeMs) {
+                    before = usvHeadingData[i];
+                }
+                if (pointTime >= targetTimeMs && !after) {
+                    after = usvHeadingData[i];
+                    break;
+                }
+            }
+            
+            // If exact match or only one point
+            if (before && after && before.time === after.time) {
+                return before.value;
+            }
+            
+            // If only one point available
+            if (before && !after) {
+                return before.value;
+            }
+            if (after && !before) {
+                return after.value;
+            }
+            
+            // Linear interpolation
+            if (before && after) {
+                const beforeTime = new Date(before.time).getTime();
+                const afterTime = new Date(after.time).getTime();
+                const ratio = (targetTimeMs - beforeTime) / (afterTime - beforeTime);
+                
+                // Handle angle wrapping (0-360 degrees)
+                let headingDiff = after.value - before.value;
+                if (headingDiff > 180) headingDiff -= 360;
+                if (headingDiff < -180) headingDiff += 360;
+                
+                let interpolatedHeading = before.value + headingDiff * ratio;
+                if (interpolatedHeading < 0) interpolatedHeading += 360;
+                if (interpolatedHeading >= 360) interpolatedHeading -= 360;
+                
+                return interpolatedHeading;
+            }
+            
+            return null;
+        }
+        
+        // Calculate distance between two GPS points using Haversine formula (in meters)
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Earth radius in meters
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+        
+        // Calculate destination point from starting point, bearing (degrees), and distance (meters)
+        function destinationPoint(lat, lon, bearing, distance) {
+            const R = 6371000; // Earth radius in meters
+            const lat1 = lat * Math.PI / 180;
+            const lon1 = lon * Math.PI / 180;
+            const brng = bearing * Math.PI / 180;
+            const d = distance;
+            
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d / R) +
+                                 Math.cos(lat1) * Math.sin(d / R) * Math.cos(brng));
+            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d / R) * Math.cos(lat1),
+                                        Math.cos(d / R) - Math.sin(lat1) * Math.sin(lat2));
+            
+            return {
+                lat: lat2 * 180 / Math.PI,
+                lon: lon2 * 180 / Math.PI
+            };
         }
         
         // Generic canvas resize function
@@ -2704,9 +2838,6 @@
         
         // Draw USV Full AUV chart
         function drawUSVFullAuvChart() {
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:2705',message:'drawUSVFullAuvChart called',data:{hasCanvas:!!usvFullAuvCanvas,hasContainer:!!usvFullAuvContainer,hasCtx:!!usvFullAuvCtx},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'E'})}).catch(()=>{});
-            // #endregion
             if (!usvFullAuvCanvas || !usvFullAuvContainer || !usvFullAuvCtx) {
                 console.warn('USV Full AUV canvas, container, or ctx not available');
                 return;
@@ -2720,9 +2851,6 @@
                 (usvFullAuvData.elevation && usvFullAuvData.elevation.length > 0)
             );
             
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:2713',message:'Checking hasData',data:{hasData:hasData,distance:usvFullAuvData?.distance?.length||0,bearing:usvFullAuvData?.bearing?.length||0,elevation:usvFullAuvData?.elevation?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'E'})}).catch(()=>{});
-            // #endregion
             
             if (!hasData) {
                 usvFullAuvCtx.clearRect(0, 0, usvFullAuvCanvas.width, usvFullAuvCanvas.height);
@@ -2922,15 +3050,14 @@
                 'Target_altitude': '#ffc107'
             };
             
-            // Draw altitude curves using utility function
-            const altitudeOrder = ['Altitude Kogger', 'Altitude Kogger raw', 'Altitude OA', 'Altitude OA filt', 'Target_altitude'];
+            // Draw altitude curves using utility function (excluding Target_altitude which will be drawn as a horizontal line)
+            const altitudeOrder = ['Altitude Kogger', 'Altitude Kogger raw', 'Altitude OA', 'Altitude OA filt'];
             altitudeOrder.forEach(altType => {
                 const shouldShow = 
                     (altType === 'Altitude Kogger' && showAltitudeKogger) ||
                     (altType === 'Altitude Kogger raw' && showAltitudeKoggerRaw) ||
                     (altType === 'Altitude OA' && showAltitudeOA) ||
-                    (altType === 'Altitude OA filt' && showAltitudeOAFilt) ||
-                    (altType === 'Target_altitude' && showTargetAltitude);
+                    (altType === 'Altitude OA filt' && showAltitudeOAFilt);
                 
                 if (shouldShow && altitudeData[altType] && altitudeData[altType].length > 0) {
                     const color = altitudeColors[altType] || '#666';
@@ -2938,6 +3065,99 @@
                         minTime, maxTime, adjustedMinValue, adjustedMaxValue, color, 2);
                 }
             });
+            
+            // Draw horizontal reference lines for altitude thresholds
+            if (runSettings.minAltitudeStartBreak !== null) {
+                const y = padding.top + chartHeight - 
+                    ((runSettings.minAltitudeStartBreak - adjustedMinValue) / 
+                     (adjustedMaxValue - adjustedMinValue)) * chartHeight;
+                
+                // Only draw if within visible range
+                if (y >= padding.top && y <= padding.top + chartHeight) {
+                    // Draw horizontal line
+                    altitudeCtx.strokeStyle = '#ff9800'; // Orange
+                    altitudeCtx.setLineDash([5, 5]); // Dashed line
+                    altitudeCtx.lineWidth = 2;
+                    altitudeCtx.beginPath();
+                    altitudeCtx.moveTo(padding.left, y);
+                    altitudeCtx.lineTo(padding.left + chartWidth, y);
+                    altitudeCtx.stroke();
+                    altitudeCtx.setLineDash([]); // Reset to solid
+                    
+                    // Add label on the left
+                    altitudeCtx.fillStyle = '#ff9800';
+                    altitudeCtx.font = '12px sans-serif';
+                    altitudeCtx.textAlign = 'right';
+                    altitudeCtx.textBaseline = 'middle';
+                    altitudeCtx.fillText(`minAltitudeStartBreak: ${runSettings.minAltitudeStartBreak}m`, 
+                                         padding.left - 10, y);
+                }
+            }
+            
+            if (runSettings.minAltitudeFullReverse !== null) {
+                const y = padding.top + chartHeight - 
+                    ((runSettings.minAltitudeFullReverse - adjustedMinValue) / 
+                     (adjustedMaxValue - adjustedMinValue)) * chartHeight;
+                
+                // Only draw if within visible range
+                if (y >= padding.top && y <= padding.top + chartHeight) {
+                    // Draw horizontal line
+                    altitudeCtx.strokeStyle = '#f44336'; // Red
+                    altitudeCtx.setLineDash([5, 5]); // Dashed line
+                    altitudeCtx.lineWidth = 2;
+                    altitudeCtx.beginPath();
+                    altitudeCtx.moveTo(padding.left, y);
+                    altitudeCtx.lineTo(padding.left + chartWidth, y);
+                    altitudeCtx.stroke();
+                    altitudeCtx.setLineDash([]); // Reset to solid
+                    
+                    // Add label on the left
+                    altitudeCtx.fillStyle = '#f44336';
+                    altitudeCtx.font = '12px sans-serif';
+                    altitudeCtx.textAlign = 'right';
+                    altitudeCtx.textBaseline = 'middle';
+                    altitudeCtx.fillText(`minAltitudeFullReverse: ${runSettings.minAltitudeFullReverse}m`, 
+                                         padding.left - 10, y);
+                }
+            }
+            
+            // Draw target altitude as a horizontal line (if available and visible)
+            if (showTargetAltitude && altitudeData['Target_altitude'] && Array.isArray(altitudeData['Target_altitude']) && altitudeData['Target_altitude'].length > 0) {
+                // Calculate average target altitude (or use first non-null value)
+                const targetValues = altitudeData['Target_altitude']
+                    .map(d => d.value)
+                    .filter(v => v !== null && v !== undefined && !isNaN(v));
+                
+                if (targetValues.length > 0) {
+                    // Use average of all target altitude values
+                    const avgTargetAltitude = targetValues.reduce((sum, val) => sum + val, 0) / targetValues.length;
+                    
+                    const y = padding.top + chartHeight - 
+                        ((avgTargetAltitude - adjustedMinValue) / 
+                         (adjustedMaxValue - adjustedMinValue)) * chartHeight;
+                    
+                    // Only draw if within visible range
+                    if (y >= padding.top && y <= padding.top + chartHeight) {
+                        // Draw horizontal line
+                        altitudeCtx.strokeStyle = '#ffc107'; // Yellow/Orange (same as original Target_altitude color)
+                        altitudeCtx.setLineDash([5, 5]); // Dashed line
+                        altitudeCtx.lineWidth = 2;
+                        altitudeCtx.beginPath();
+                        altitudeCtx.moveTo(padding.left, y);
+                        altitudeCtx.lineTo(padding.left + chartWidth, y);
+                        altitudeCtx.stroke();
+                        altitudeCtx.setLineDash([]); // Reset to solid
+                        
+                        // Add label on the left
+                        altitudeCtx.fillStyle = '#ffc107';
+                        altitudeCtx.font = '12px sans-serif';
+                        altitudeCtx.textAlign = 'right';
+                        altitudeCtx.textBaseline = 'middle';
+                        altitudeCtx.fillText(`Target Altitude: ${Math.round(avgTargetAltitude * 10) / 10}m`, 
+                                             padding.left - 10, y);
+                    }
+                }
+            }
             
             // Update cursor line
             updateCursorLine(altitudeCursorLine, selectedTime, minTime, maxTime, padding, chartWidth);
@@ -3120,20 +3340,11 @@
         // Load USV Full AUV data
         async function loadUSVFullAuvData() {
             try {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3115',message:'loadUSVFullAuvData called',data:{runId:runId},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
-                // #endregion
                 const response = await fetch(`/api/run/${runId}/usv_full_auv_data`);
                 if (!response.ok) {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3117',message:'HTTP error',data:{status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
-                    // #endregion
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 usvFullAuvDataFull = await response.json();
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3119',message:'Data loaded',data:{distance:usvFullAuvDataFull.distance?.length||0,bearing:usvFullAuvDataFull.bearing?.length||0,elevation:usvFullAuvDataFull.elevation?.length||0,state:usvFullAuvDataFull.state?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
-                // #endregion
                 console.log('Loaded USV Full AUV data (full):', {
                     distance: usvFullAuvDataFull.distance.length,
                     bearing: usvFullAuvDataFull.bearing.length,
@@ -3143,9 +3354,6 @@
                 
                 // Filter data based on display range
                 filterDataByDisplayRange();
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3128',message:'After filter',data:{distance:usvFullAuvData.distance?.length||0,bearing:usvFullAuvData.bearing?.length||0,elevation:usvFullAuvData.elevation?.length||0,state:usvFullAuvData.state?.length||0,displayStartTime:displayStartTime,displayEndTime:displayEndTime},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'D'})}).catch(()=>{});
-                // #endregion
                 console.log('Filtered USV Full AUV data:', {
                     distance: usvFullAuvData.distance.length,
                     bearing: usvFullAuvData.bearing.length,
@@ -3160,9 +3368,6 @@
                     drawUSVFullAuvChart();
                 }, 100);
             } catch (error) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:3142',message:'Error loading data',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'C'})}).catch(()=>{});
-                // #endregion
                 console.error('Error loading USV Full AUV data:', error);
             }
         }
@@ -3255,6 +3460,80 @@
                 initMap();
             } catch (error) {
                 console.error('Error loading USV position data:', error);
+            }
+        }
+        
+        // Load AUV calculated position data
+        async function loadAUVPositionData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/auv_calculated_position`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                auvPositionDataFull = await response.json();
+                console.log(`Loaded ${auvPositionDataFull.length} AUV calculated position points (full)`);
+                
+                // Filter out points at (0, 0) - invalid coordinates
+                auvPositionDataFull = auvPositionDataFull.filter(p => {
+                    return p.lat !== 0 || p.lon !== 0;
+                });
+                console.log(`After filtering (0,0): ${auvPositionDataFull.length} AUV position points`);
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${auvPositionData.length} AUV position points`);
+                
+                if (auvPositionData.length === 0) {
+                    console.warn('No AUV calculated position data found for this run period');
+                }
+                // Update map if it's already initialized
+                if (map) {
+                    updateMapTrajectory();
+                }
+            } catch (error) {
+                console.error('Error loading AUV calculated position data:', error);
+            }
+        }
+        
+        // Load USV heading data
+        // Load run settings (for altitude reference lines)
+        async function loadRunSettings() {
+            try {
+                const response = await fetch(`/api/run/${runId}/settings`);
+                if (!response.ok) {
+                    console.warn('Failed to load run settings:', response.statusText);
+                    return;
+                }
+                const data = await response.json();
+                runSettings.minAltitudeStartBreak = data.minAltitudeStartBreak !== null && data.minAltitudeStartBreak !== undefined 
+                    ? parseFloat(data.minAltitudeStartBreak) : null;
+                runSettings.minAltitudeFullReverse = data.minAltitudeFullReverse !== null && data.minAltitudeFullReverse !== undefined 
+                    ? parseFloat(data.minAltitudeFullReverse) : null;
+                console.log('Run settings loaded:', runSettings);
+                
+                // Redraw altitude chart to show reference lines
+                if (altitudeCanvas && altitudeContainer) {
+                    drawAltitudeChart();
+                }
+            } catch (error) {
+                console.warn('Error loading run settings:', error);
+            }
+        }
+        
+        async function loadUSVHeadingData() {
+            try {
+                const response = await fetch(`/api/run/${runId}/usv_heading`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                usvHeadingDataFull = await response.json();
+                console.log(`Loaded ${usvHeadingDataFull.length} USV heading points (full)`);
+                
+                // Filter data based on display range
+                filterDataByDisplayRange();
+                console.log(`Filtered to ${usvHeadingData.length} USV heading points`);
+            } catch (error) {
+                console.error('Error loading USV heading data:', error);
             }
         }
         
@@ -3763,6 +4042,21 @@
             return value;
         }
         
+        // Helper function to get value from Y coordinate, clamping to chart bounds if outside
+        // This allows zoom to work even when the selection box extends beyond the chart area
+        function getValueFromYForCanvasClamped(containerEl, y, minValue, maxValue) {
+            const rect = containerEl.getBoundingClientRect();
+            const padding = {top: 40, right: 20, bottom: 40, left: 60};
+            const chartHeight = rect.height - padding.top - padding.bottom;
+            
+            // Clamp y to chart bounds
+            const clampedY = Math.max(padding.top, Math.min(y, padding.top + chartHeight));
+            
+            const yRatio = (clampedY - padding.top) / chartHeight;
+            const value = maxValue - (yRatio * (maxValue - minValue));
+            return value;
+        }
+        
         // Helper function to get current value range for a chart
         function getCurrentValueRange(chartId) {
             // Return stored range if available, otherwise calculate from data
@@ -3770,7 +4064,9 @@
             
             switch(chartId) {
                 case 'depth':
-                    if (depthYRange) return depthYRange;
+                    if (depthYRange) {
+                        return depthYRange;
+                    }
                     const depthValues = depthData.map(d => d.depth || 0);
                     if (depthValues.length > 0) {
                         const {min, max} = calculateMinMax(depthValues);
@@ -3875,7 +4171,9 @@
                     }
                     break;
                 case 'altitude':
-                    if (altitudeYRange) return altitudeYRange;
+                    if (altitudeYRange) {
+                        return altitudeYRange;
+                    }
                     let allAltitudeValues = [];
                     Object.keys(altitudeData).forEach(key => {
                         if (getAltitudeVisibility(key) && altitudeData[key]) {
@@ -3889,7 +4187,6 @@
                     }
                     break;
             }
-            
             return {min: minValue, max: maxValue};
         }
         
@@ -3940,6 +4237,25 @@
             const visibleRange = getVisibleTimeRange();
             const timeSpan = visibleRange.max - visibleRange.min;
             const relativeX = (x - padding.left) / chartWidth;
+            return visibleRange.min + (relativeX * timeSpan);
+        }
+        
+        // Helper function to get time from X coordinate, clamping to chart bounds if outside
+        // This allows zoom to work even when the selection box extends beyond the chart area
+        function getTimeFromXForCanvasClamped(containerEl, x) {
+            if (!containerEl) return null;
+            const padding = { left: 80, right: 40 };
+            // Use CSS width (not physical canvas width) to match mouse coordinates
+            const rect = containerEl.getBoundingClientRect();
+            const cssWidth = rect.width;
+            const chartWidth = cssWidth - padding.left - padding.right;
+            
+            // Clamp x to chart bounds
+            const clampedX = Math.max(padding.left, Math.min(x, cssWidth - padding.right));
+            
+            const visibleRange = getVisibleTimeRange();
+            const timeSpan = visibleRange.max - visibleRange.min;
+            const relativeX = (clampedX - padding.left) / chartWidth;
             return visibleRange.min + (relativeX * timeSpan);
         }
         
@@ -4136,9 +4452,8 @@
         
         // Shared zoom handlers for all charts
         function handleZoomClick(containerEl, x, y) {
-            if (!isInChartAreaForCanvas(containerEl, x, y)) return;
-            
-            const clickedTime = getTimeFromXForCanvas(containerEl, x);
+            // Allow clicks outside chart area - use clamped version to calculate time
+            const clickedTime = getTimeFromXForCanvasClamped(containerEl, x);
             if (clickedTime === null) return;
             
             if (!waitingForSecondClick || firstClickTime === null) {
@@ -4351,61 +4666,56 @@
         function attachZoomListeners(canvasEl, containerEl, chartId) {
             if (!canvasEl || !containerEl) return;
             
-            // Mousedown: start drag
-            canvasEl.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return; // Only left click
-                
-                const rect = canvasEl.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                
-                // Start selection box
-                isDragging = true;
-                currentDraggingChart = chartId;
-                dragStart = {x, y, time: getTimeFromXForCanvas(containerEl, x)};
-                dragCurrent = {x, y};
-                e.preventDefault();
-            });
+            // Store reference to current container for document-level event handlers
+            let currentContainerForDrag = null;
+            let currentChartIdForDrag = null;
             
-            // Mousemove: update drag
-            canvasEl.addEventListener('mousemove', (e) => {
-                const rect = canvasEl.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                
-                if (isDragging) {
-                    dragCurrent = {x, y};
-                    drawChartById(chartId); // Redraw to show selection box
-                } else {
-                    // Normal hover (cursor line)
-                    handleZoomMouseMove(containerEl, x, y);
-                }
-            });
-            
-            // Mouseup: apply zoom
-            canvasEl.addEventListener('mouseup', (e) => {
-                if (e.button === 0 && isDragging) {
+            // Function to handle mouseup on document (to capture release even outside canvas)
+            const handleDocumentMouseUp = (e) => {
+                if (e.button === 0 && isDragging && currentContainerForDrag && currentChartIdForDrag === chartId) {
+                    const containerRect = currentContainerForDrag.getBoundingClientRect();
+                    const x = e.clientX - containerRect.left;
+                    const y = e.clientY - containerRect.top;
+                    
+                    // Update dragCurrent with final position
+                    if (dragStart) {
+                        dragCurrent = {x, y};
+                    }
+                    
                     // Apply zoom
                     if (dragStart && dragCurrent) {
-                        const startTime = getTimeFromXForCanvas(containerEl, Math.min(dragStart.x, dragCurrent.x));
-                        const endTime = getTimeFromXForCanvas(containerEl, Math.max(dragStart.x, dragCurrent.x));
+                        // Use clamped version to allow zoom even when selection box extends beyond chart area
+                        const startTime = getTimeFromXForCanvasClamped(currentContainerForDrag, Math.min(dragStart.x, dragCurrent.x));
+                        const endTime = getTimeFromXForCanvasClamped(currentContainerForDrag, Math.max(dragStart.x, dragCurrent.x));
+                        
+                        // Store Y coordinates before time zoom (they are relative to container, so should remain valid)
+                        const minY = Math.min(dragStart.y, dragCurrent.y);
+                        const maxY = Math.max(dragStart.y, dragCurrent.y);
                         
                         // Time zoom (always)
                         if (startTime && endTime && Math.abs(endTime - startTime) > 100) {
                             applyTimeZoom(startTime, endTime);
+                            // After time zoom, the container may have been redrawn, so recalculate Y coordinates relative to current container
+                            // But since Y is relative to container top and container doesn't change position, Y should still be valid
+                            // However, if canvas/container dimensions changed, we need to account for that
                         }
                         
                         // Value zoom (if Y range is significant)
-                        const minY = Math.min(dragStart.y, dragCurrent.y);
-                        const maxY = Math.max(dragStart.y, dragCurrent.y);
+                        // Use stored Y coordinates (they are relative to container, which doesn't change position)
                         if (Math.abs(maxY - minY) > 10) { // At least 10 pixels
                             // Get current value range for this chart
                             const {min: minValue, max: maxValue} = getCurrentValueRange(chartId);
-                            const startValue = getValueFromYForCanvas(containerEl, maxY, minValue, maxValue);
-                            const endValue = getValueFromYForCanvas(containerEl, minY, minValue, maxValue);
+                            // For depth and altitude: minY (top) should give the higher value, maxY (bottom) should give the lower value
+                            // But getValueFromYForCanvas maps: top Y -> maxValue, bottom Y -> minValue
+                            // So we need to swap: startValue from maxY (bottom, lower value), endValue from minY (top, higher value)
+                            // Use clamped version to allow zoom even when selection box extends beyond chart area
+                            const startValue = getValueFromYForCanvasClamped(currentContainerForDrag, maxY, minValue, maxValue);
+                            const endValue = getValueFromYForCanvasClamped(currentContainerForDrag, minY, minValue, maxValue);
                             
                             if (startValue !== null && endValue !== null && Math.abs(endValue - startValue) > 0.01) {
-                                applyValueZoom(chartId, Math.min(startValue, endValue), Math.max(startValue, endValue));
+                                const finalMin = Math.min(startValue, endValue);
+                                const finalMax = Math.max(startValue, endValue);
+                                applyValueZoom(chartId, finalMin, finalMax);
                             }
                         }
                     }
@@ -4414,7 +4724,62 @@
                     dragStart = null;
                     dragCurrent = null;
                     currentDraggingChart = null;
+                    currentContainerForDrag = null;
+                    currentChartIdForDrag = null;
                     drawAllCharts();
+                    
+                    // Remove document-level event listeners
+                    document.removeEventListener('mouseup', handleDocumentMouseUp);
+                    document.removeEventListener('mousemove', handleDocumentMouseMove);
+                }
+            };
+            
+            // Function to handle mousemove on document (to capture movement even outside canvas)
+            const handleDocumentMouseMove = (e) => {
+                if (isDragging && currentContainerForDrag && currentChartIdForDrag === chartId) {
+                    const containerRect = currentContainerForDrag.getBoundingClientRect();
+                    const x = e.clientX - containerRect.left;
+                    const y = e.clientY - containerRect.top;
+                    
+                    dragCurrent = {x, y};
+                    drawChartById(chartId); // Redraw to show selection box
+                }
+            };
+            
+            // Mousedown: start drag
+            canvasEl.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // Only left click
+                
+                const canvasRect = canvasEl.getBoundingClientRect();
+                const containerRect = containerEl.getBoundingClientRect();
+                const x = e.clientX - containerRect.left; // Use container for X to match getTimeFromXForCanvas
+                const y = e.clientY - containerRect.top; // Use container for Y to match getValueFromYForCanvas
+                
+                // Start selection box
+                isDragging = true;
+                currentDraggingChart = chartId;
+                currentContainerForDrag = containerEl;
+                currentChartIdForDrag = chartId;
+                dragStart = {x, y, time: getTimeFromXForCanvas(containerEl, x)};
+                dragCurrent = {x, y};
+                
+                // Attach document-level listeners to capture events even outside canvas
+                document.addEventListener('mouseup', handleDocumentMouseUp);
+                document.addEventListener('mousemove', handleDocumentMouseMove);
+                
+                e.preventDefault();
+            });
+            
+            // Mousemove: update drag (for hover when not dragging)
+            canvasEl.addEventListener('mousemove', (e) => {
+                const canvasRect = canvasEl.getBoundingClientRect();
+                const containerRect = containerEl.getBoundingClientRect();
+                const x = e.clientX - containerRect.left; // Use container for X to match getTimeFromXForCanvas
+                const y = e.clientY - containerRect.top; // Use container for Y to match getValueFromYForCanvas
+                
+                if (!isDragging) {
+                    // Normal hover (cursor line)
+                    handleZoomMouseMove(containerEl, x, y);
                 }
             });
             
@@ -4468,6 +4833,15 @@
                 window.usvPositionData = usvPositionData;
             }
             
+            // Filter AUV position data
+            if (auvPositionDataFull && Array.isArray(auvPositionDataFull)) {
+                auvPositionData = filterArrayByTimeRange(auvPositionDataFull, displayStartTime, displayEndTime);
+                // Filter out points at (0, 0) - invalid coordinates
+                auvPositionData = auvPositionData.filter(p => {
+                    return p.lat !== 0 || p.lon !== 0;
+                });
+            }
+            
             // Filter StateNb data (special case: include states before displayStartTime)
             if (stateDataFull && Array.isArray(stateDataFull)) {
                 if (displayStartTime !== null && displayEndTime !== null) {
@@ -4489,6 +4863,11 @@
             // Filter USV Order to AUV data
             if (usvOrderDataFull && Array.isArray(usvOrderDataFull)) {
                 usvOrderData = filterArrayByTimeRange(usvOrderDataFull, displayStartTime, displayEndTime);
+            }
+            
+            // Filter USV heading data
+            if (usvHeadingDataFull && Array.isArray(usvHeadingDataFull)) {
+                usvHeadingData = filterArrayByTimeRange(usvHeadingDataFull, displayStartTime, displayEndTime);
             }
             
             // Filter BearingPing data
@@ -4517,18 +4896,12 @@
             
             // Filter USV Full AUV data
             if (usvFullAuvDataFull && typeof usvFullAuvDataFull === 'object') {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:4487',message:'Before filter',data:{distanceFull:usvFullAuvDataFull.distance?.length||0,bearingFull:usvFullAuvDataFull.bearing?.length||0,elevationFull:usvFullAuvDataFull.elevation?.length||0,displayStartTime:displayStartTime,displayEndTime:displayEndTime},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'D'})}).catch(()=>{});
-                // #endregion
                 usvFullAuvData = {
                     distance: filterArrayByTimeRange(usvFullAuvDataFull.distance || [], displayStartTime, displayEndTime),
                     bearing: filterArrayByTimeRange(usvFullAuvDataFull.bearing || [], displayStartTime, displayEndTime),
                     elevation: filterArrayByTimeRange(usvFullAuvDataFull.elevation || [], displayStartTime, displayEndTime),
                     state: filterArrayByTimeRange(usvFullAuvDataFull.state || [], displayStartTime, displayEndTime)
                 };
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/1ae904b0-1d03-4cfb-8868-175aada31c54',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'run_detail.html:4493',message:'After filter',data:{distance:usvFullAuvData.distance?.length||0,bearing:usvFullAuvData.bearing?.length||0,elevation:usvFullAuvData.elevation?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'frontend',hypothesisId:'D'})}).catch(()=>{});
-                // #endregion
             }
             
             // Filter altitude data
@@ -4609,48 +4982,64 @@
             });
         }
         
+        // Get filtered AUV position data based on display time range
+        function getFilteredAUVPositionData() {
+            // Filter out points at (0, 0) - invalid coordinates
+            if (!auvPositionData || !Array.isArray(auvPositionData)) {
+                return [];
+            }
+            return auvPositionData.filter(p => {
+                return p.lat !== 0 || p.lon !== 0;
+            });
+        }
+        
         // Initialize map
         function initMap() {
-            if (usvPositionData.length === 0) {
-                console.log('No USV position data to display on map');
+            const filteredUSVData = getFilteredPositionData();
+            const filteredAUVData = getFilteredAUVPositionData();
+            
+            if (filteredUSVData.length === 0 && filteredAUVData.length === 0) {
+                console.log('No position data to display on map');
                 // Show a message in the map container
                 const mapDiv = document.getElementById('map');
-                mapDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Aucune donnée de position USV disponible pour cette période</div>';
+                mapDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Aucune donnée de position disponible pour cette période</div>';
                 return;
             }
             
-            console.log(`Initializing map with ${usvPositionData.length} position points`);
+            console.log(`Initializing map with ${filteredUSVData.length} USV position points and ${filteredAUVData.length} AUV position points`);
             
-            // Get filtered data
-            const filteredData = getFilteredPositionData();
+            // Calculate bounds from both datasets
+            const allLats = [];
+            const allLons = [];
+            filteredUSVData.forEach(p => { allLats.push(p.lat); allLons.push(p.lon); });
+            filteredAUVData.forEach(p => { allLats.push(p.lat); allLons.push(p.lon); });
             
-            if (filteredData.length === 0) {
+            if (allLats.length === 0) {
                 console.log('No data in selected time range');
                 return;
             }
             
-            // Calculate bounds from filtered data
-            const lats = filteredData.map(p => p.lat);
-            const lons = filteredData.map(p => p.lon);
             // Use loops to avoid stack overflow with large arrays
             let minLat = Infinity;
             let maxLat = -Infinity;
             let minLon = Infinity;
             let maxLon = -Infinity;
-            for (let i = 0; i < lats.length; i++) {
-                if (lats[i] < minLat) minLat = lats[i];
-                if (lats[i] > maxLat) maxLat = lats[i];
+            for (let i = 0; i < allLats.length; i++) {
+                if (allLats[i] < minLat) minLat = allLats[i];
+                if (allLats[i] > maxLat) maxLat = allLats[i];
             }
-            for (let i = 0; i < lons.length; i++) {
-                if (lons[i] < minLon) minLon = lons[i];
-                if (lons[i] > maxLon) maxLon = lons[i];
+            for (let i = 0; i < allLons.length; i++) {
+                if (allLons[i] < minLon) minLon = allLons[i];
+                if (allLons[i] > maxLon) maxLon = allLons[i];
             }
             
             console.log(`Map bounds: lat [${minLat}, ${maxLat}], lon [${minLon}, ${maxLon}]`);
             
             // Create map if it doesn't exist
             if (!map) {
-                map = L.map('map').fitBounds([
+                map = L.map('map', {
+                    maxZoom: 22
+                }).fitBounds([
                     [minLat, minLon],
                     [maxLat, maxLon]
                 ], { padding: [20, 20] });
@@ -4658,22 +5047,184 @@
                 // Add satellite tile layer (Esri World Imagery)
                 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                     attribution: 'Esri',
-                    maxZoom: 19
+                    maxZoom: 22
                 }).addTo(map);
             }
             
-            // Remove existing trajectory
+            // Remove existing trajectories
             if (usvTrajectory) {
                 map.removeLayer(usvTrajectory);
+                usvTrajectory = null;
+            }
+            if (auvTrajectory) {
+                map.removeLayer(auvTrajectory);
+                auvTrajectory = null;
             }
             
-            // Draw trajectory with filtered data
-            const trajectoryPoints = filteredData.map(p => [p.lat, p.lon]);
-            usvTrajectory = L.polyline(trajectoryPoints, {
-                color: '#007bff',
-                weight: 3,
-                opacity: 0.7
-            }).addTo(map);
+            // Remove existing markers
+            usvMarkers.forEach(marker => map.removeLayer(marker));
+            usvMarkers = [];
+            auvMarkers.forEach(marker => map.removeLayer(marker));
+            auvMarkers = [];
+            
+            // Remove existing vectors
+            usvHeadingVectors.forEach(vector => map.removeLayer(vector));
+            usvHeadingVectors = [];
+            usblBearingVectors.forEach(vector => map.removeLayer(vector));
+            usblBearingVectors = [];
+            
+            // Draw USV trajectory if visible
+            if (showUsvTrajectory && filteredUSVData.length > 0) {
+                const trajectoryPoints = filteredUSVData.map(p => [p.lat, p.lon]);
+                usvTrajectory = L.polyline(trajectoryPoints, {
+                    color: '#007bff',
+                    weight: 1.5,
+                    opacity: 0.7
+                }).addTo(map);
+            }
+            
+            // Draw AUV trajectory if visible
+            if (showAuvTrajectory && filteredAUVData.length > 0) {
+                const trajectoryPoints = filteredAUVData.map(p => [p.lat, p.lon]);
+                auvTrajectory = L.polyline(trajectoryPoints, {
+                    color: '#28a745',
+                    weight: 1.5,
+                    opacity: 0.7
+                }).addTo(map);
+            }
+            
+            // Add small markers for each USV position
+            filteredUSVData.forEach(point => {
+                const marker = L.circleMarker([point.lat, point.lon], {
+                    radius: 2,
+                    fillColor: '#007bff',
+                    color: '#007bff',
+                    weight: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+                usvMarkers.push(marker);
+            });
+            
+            // Add small markers for each AUV position
+            filteredAUVData.forEach(point => {
+                const marker = L.circleMarker([point.lat, point.lon], {
+                    radius: 2,
+                    fillColor: '#28a745',
+                    color: '#28a745',
+                    weight: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+                auvMarkers.push(marker);
+            });
+            
+            // Draw USV heading vectors if enabled
+            if (showUsvHeading && filteredUSVData.length > 2) {
+                // Remove existing heading vectors
+                usvHeadingVectors.forEach(vector => map.removeLayer(vector));
+                usvHeadingVectors = [];
+                
+                for (let i = 1; i < filteredUSVData.length - 1; i++) {
+                    const prevPoint = filteredUSVData[i - 1];
+                    const currentPoint = filteredUSVData[i];
+                    const nextPoint = filteredUSVData[i + 1];
+                    
+                    // Calculate distance between previous and next position
+                    const distance = calculateDistance(prevPoint.lat, prevPoint.lon, nextPoint.lat, nextPoint.lon);
+                    const vectorLength = distance / 2; // Half the distance
+                    
+                    // Get heading at current point time
+                    const heading = interpolateUSVHeading(currentPoint.time);
+                    if (heading === null) continue;
+                    
+                    // Calculate destination point
+                    const dest = destinationPoint(currentPoint.lat, currentPoint.lon, heading, vectorLength);
+                    
+                    // Draw vector as a polyline with arrow
+                    const vector = L.polyline([
+                        [currentPoint.lat, currentPoint.lon],
+                        [dest.lat, dest.lon]
+                    ], {
+                        color: '#ffc107',
+                        weight: 2,
+                        opacity: 0.8
+                    }).addTo(map);
+                    usvHeadingVectors.push(vector);
+                }
+            }
+            
+            // Draw USBL bearing vectors if enabled
+            if (showUsblBearing && usvFullAuvData.bearing && usvFullAuvData.distance && 
+                usvFullAuvData.bearing.length > 0 && usvFullAuvData.distance.length > 0 && 
+                filteredUSVData.length > 0) {
+                // Remove existing USBL bearing vectors
+                usblBearingVectors.forEach(vector => map.removeLayer(vector));
+                usblBearingVectors = [];
+                
+                // Create a map of USBL data by time for quick lookup
+                const usblDataMap = new Map();
+                usvFullAuvData.bearing.forEach(bearingPoint => {
+                    const time = new Date(bearingPoint.time).getTime();
+                    if (!usblDataMap.has(time)) {
+                        usblDataMap.set(time, {});
+                    }
+                    usblDataMap.get(time).bearing = bearingPoint.value;
+                });
+                usvFullAuvData.distance.forEach(distancePoint => {
+                    const time = new Date(distancePoint.time).getTime();
+                    if (!usblDataMap.has(time)) {
+                        usblDataMap.set(time, {});
+                    }
+                    usblDataMap.get(time).distance = distancePoint.value;
+                });
+                
+                // For each USBL data point
+                usblDataMap.forEach((usblData, usblTime) => {
+                    if (usblData.bearing === undefined || usblData.distance === undefined) {
+                        return; // Skip if we don't have both bearing and distance
+                    }
+                    
+                    // Find closest USV position in time
+                    let closestUSVPoint = null;
+                    let minTimeDiff = Infinity;
+                    
+                    filteredUSVData.forEach(usvPoint => {
+                        const usvTime = new Date(usvPoint.time).getTime();
+                        const timeDiff = Math.abs(usvTime - usblTime);
+                        if (timeDiff < minTimeDiff) {
+                            minTimeDiff = timeDiff;
+                            closestUSVPoint = usvPoint;
+                        }
+                    });
+                    
+                    if (!closestUSVPoint) return;
+                    
+                    // Interpolate USV heading at USBL time
+                    const usvHeading = interpolateUSVHeading(new Date(usblTime).toISOString());
+                    if (usvHeading === null) return;
+                    
+                    // Calculate direction: heading USV - bearing USBL
+                    // Note: Bearing is typically defined relative to USV heading, may need subtraction
+                    let direction = (usvHeading - usblData.bearing) % 360;
+                    if (direction < 0) direction += 360;
+                    
+                    // Use USBL distance as vector length (divide by 10 if distance is in decimeters)
+                    const vectorLength = usblData.distance / 10.0;
+                    
+                    // Calculate destination point
+                    const dest = destinationPoint(closestUSVPoint.lat, closestUSVPoint.lon, direction, vectorLength);
+                    
+                    // Draw vector
+                    const vector = L.polyline([
+                        [closestUSVPoint.lat, closestUSVPoint.lon],
+                        [dest.lat, dest.lon]
+                    ], {
+                        color: '#dc3545',
+                        weight: 2,
+                        opacity: 0.8
+                    }).addTo(map);
+                    usblBearingVectors.push(vector);
+                });
+            }
             
             // Update map bounds if range is selected
             if (timeRange.start !== null && timeRange.end !== null) {
@@ -4683,57 +5234,263 @@
                 ], { padding: [20, 20] });
             }
             
-            console.log(`Map updated with ${filteredData.length} position points`);
+            console.log(`Map updated with ${filteredUSVData.length} USV and ${filteredAUVData.length} AUV position points`);
+        }
+        
+        // Reset map zoom to fit all data in current time range
+        function resetMapZoom() {
+            if (!map) return;
+            
+            const filteredUSVData = getFilteredPositionData();
+            const filteredAUVData = getFilteredAUVPositionData();
+            
+            if (filteredUSVData.length === 0 && filteredAUVData.length === 0) {
+                console.log('No position data to zoom to');
+                return;
+            }
+            
+            // Calculate bounds from both datasets
+            const allLats = [];
+            const allLons = [];
+            filteredUSVData.forEach(p => { allLats.push(p.lat); allLons.push(p.lon); });
+            filteredAUVData.forEach(p => { allLats.push(p.lat); allLons.push(p.lon); });
+            
+            if (allLats.length === 0) {
+                console.log('No data in current time range');
+                return;
+            }
+            
+            // Use loops to avoid stack overflow with large arrays
+            let minLat = Infinity;
+            let maxLat = -Infinity;
+            let minLon = Infinity;
+            let maxLon = -Infinity;
+            for (let i = 0; i < allLats.length; i++) {
+                if (allLats[i] < minLat) minLat = allLats[i];
+                if (allLats[i] > maxLat) maxLat = allLats[i];
+            }
+            for (let i = 0; i < allLons.length; i++) {
+                if (allLons[i] < minLon) minLon = allLons[i];
+                if (allLons[i] > maxLon) maxLon = allLons[i];
+            }
+            
+            // Fit bounds to show all data in current time range
+            map.fitBounds([
+                [minLat, minLon],
+                [maxLat, maxLon]
+            ], { padding: [20, 20] });
+            
+            console.log(`Map zoom reset to fit ${filteredUSVData.length} USV and ${filteredAUVData.length} AUV position points`);
         }
         
         // Update map trajectory based on time range
         function updateMapTrajectory() {
             if (!map) return;
             
-            const filteredData = getFilteredPositionData();
+            const filteredUSVData = getFilteredPositionData();
+            const filteredAUVData = getFilteredAUVPositionData();
             
-            if (filteredData.length === 0) {
-                if (usvTrajectory) {
-                    map.removeLayer(usvTrajectory);
-                    usvTrajectory = null;
-                }
-                return;
-            }
-            
-            // Remove existing trajectory
+            // Remove existing trajectories
             if (usvTrajectory) {
                 map.removeLayer(usvTrajectory);
+                usvTrajectory = null;
+            }
+            if (auvTrajectory) {
+                map.removeLayer(auvTrajectory);
+                auvTrajectory = null;
             }
             
-            // Draw new trajectory
-            const trajectoryPoints = filteredData.map(p => [p.lat, p.lon]);
-            usvTrajectory = L.polyline(trajectoryPoints, {
-                color: '#007bff',
-                weight: 3,
-                opacity: 0.7
-            }).addTo(map);
+            // Remove existing markers
+            usvMarkers.forEach(marker => map.removeLayer(marker));
+            usvMarkers = [];
+            auvMarkers.forEach(marker => map.removeLayer(marker));
+            auvMarkers = [];
             
-            // Update bounds
-            const lats = filteredData.map(p => p.lat);
-            const lons = filteredData.map(p => p.lon);
-            // Use loops to avoid stack overflow with large arrays
-            let minLat = Infinity;
-            let maxLat = -Infinity;
-            let minLon = Infinity;
-            let maxLon = -Infinity;
-            for (let i = 0; i < lats.length; i++) {
-                if (lats[i] < minLat) minLat = lats[i];
-                if (lats[i] > maxLat) maxLat = lats[i];
-            }
-            for (let i = 0; i < lons.length; i++) {
-                if (lons[i] < minLon) minLon = lons[i];
-                if (lons[i] > maxLon) maxLon = lons[i];
+            // Remove existing vectors
+            usvHeadingVectors.forEach(vector => map.removeLayer(vector));
+            usvHeadingVectors = [];
+            usblBearingVectors.forEach(vector => map.removeLayer(vector));
+            usblBearingVectors = [];
+            
+            // Draw USV trajectory if visible
+            if (showUsvTrajectory && filteredUSVData.length > 0) {
+                const trajectoryPoints = filteredUSVData.map(p => [p.lat, p.lon]);
+                usvTrajectory = L.polyline(trajectoryPoints, {
+                    color: '#007bff',
+                    weight: 1.5,
+                    opacity: 0.7
+                }).addTo(map);
             }
             
-            map.fitBounds([
-                [minLat, minLon],
-                [maxLat, maxLon]
-            ], { padding: [20, 20] });
+            // Draw AUV trajectory if visible
+            if (showAuvTrajectory && filteredAUVData.length > 0) {
+                const trajectoryPoints = filteredAUVData.map(p => [p.lat, p.lon]);
+                auvTrajectory = L.polyline(trajectoryPoints, {
+                    color: '#28a745',
+                    weight: 1.5,
+                    opacity: 0.7
+                }).addTo(map);
+            }
+            
+            // Add small markers for each USV position
+            filteredUSVData.forEach(point => {
+                const marker = L.circleMarker([point.lat, point.lon], {
+                    radius: 2,
+                    fillColor: '#007bff',
+                    color: '#007bff',
+                    weight: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+                usvMarkers.push(marker);
+            });
+            
+            // Add small markers for each AUV position
+            filteredAUVData.forEach(point => {
+                const marker = L.circleMarker([point.lat, point.lon], {
+                    radius: 2,
+                    fillColor: '#28a745',
+                    color: '#28a745',
+                    weight: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+                auvMarkers.push(marker);
+            });
+            
+            // Draw USV heading vectors if enabled
+            if (showUsvHeading && filteredUSVData.length > 2) {
+                // Remove existing heading vectors
+                usvHeadingVectors.forEach(vector => map.removeLayer(vector));
+                usvHeadingVectors = [];
+                
+                for (let i = 1; i < filteredUSVData.length - 1; i++) {
+                    const prevPoint = filteredUSVData[i - 1];
+                    const currentPoint = filteredUSVData[i];
+                    const nextPoint = filteredUSVData[i + 1];
+                    
+                    // Calculate distance between previous and next position
+                    const distance = calculateDistance(prevPoint.lat, prevPoint.lon, nextPoint.lat, nextPoint.lon);
+                    const vectorLength = distance / 2; // Half the distance
+                    
+                    // Get heading at current point time
+                    const heading = interpolateUSVHeading(currentPoint.time);
+                    if (heading === null) continue;
+                    
+                    // Calculate destination point
+                    const dest = destinationPoint(currentPoint.lat, currentPoint.lon, heading, vectorLength);
+                    
+                    // Draw vector as a polyline with arrow
+                    const vector = L.polyline([
+                        [currentPoint.lat, currentPoint.lon],
+                        [dest.lat, dest.lon]
+                    ], {
+                        color: '#ffc107',
+                        weight: 2,
+                        opacity: 0.8
+                    }).addTo(map);
+                    usvHeadingVectors.push(vector);
+                }
+            }
+            
+            // Draw USBL bearing vectors if enabled
+            if (showUsblBearing && usvFullAuvData.bearing && usvFullAuvData.distance && 
+                usvFullAuvData.bearing.length > 0 && usvFullAuvData.distance.length > 0 && 
+                filteredUSVData.length > 0) {
+                // Remove existing USBL bearing vectors
+                usblBearingVectors.forEach(vector => map.removeLayer(vector));
+                usblBearingVectors = [];
+                
+                // Create a map of USBL data by time for quick lookup
+                const usblDataMap = new Map();
+                usvFullAuvData.bearing.forEach(bearingPoint => {
+                    const time = new Date(bearingPoint.time).getTime();
+                    if (!usblDataMap.has(time)) {
+                        usblDataMap.set(time, {});
+                    }
+                    usblDataMap.get(time).bearing = bearingPoint.value;
+                });
+                usvFullAuvData.distance.forEach(distancePoint => {
+                    const time = new Date(distancePoint.time).getTime();
+                    if (!usblDataMap.has(time)) {
+                        usblDataMap.set(time, {});
+                    }
+                    usblDataMap.get(time).distance = distancePoint.value;
+                });
+                
+                // For each USBL data point
+                usblDataMap.forEach((usblData, usblTime) => {
+                    if (usblData.bearing === undefined || usblData.distance === undefined) {
+                        return; // Skip if we don't have both bearing and distance
+                    }
+                    
+                    // Find closest USV position in time
+                    let closestUSVPoint = null;
+                    let minTimeDiff = Infinity;
+                    
+                    filteredUSVData.forEach(usvPoint => {
+                        const usvTime = new Date(usvPoint.time).getTime();
+                        const timeDiff = Math.abs(usvTime - usblTime);
+                        if (timeDiff < minTimeDiff) {
+                            minTimeDiff = timeDiff;
+                            closestUSVPoint = usvPoint;
+                        }
+                    });
+                    
+                    if (!closestUSVPoint) return;
+                    
+                    // Interpolate USV heading at USBL time
+                    const usvHeading = interpolateUSVHeading(new Date(usblTime).toISOString());
+                    if (usvHeading === null) return;
+                    
+                    // Calculate direction: heading USV - bearing USBL
+                    // Note: Bearing is typically defined relative to USV heading, may need subtraction
+                    let direction = (usvHeading - usblData.bearing) % 360;
+                    if (direction < 0) direction += 360;
+                    
+                    // Use USBL distance as vector length (divide by 10 if distance is in decimeters)
+                    const vectorLength = usblData.distance / 10.0;
+                    
+                    // Calculate destination point
+                    const dest = destinationPoint(closestUSVPoint.lat, closestUSVPoint.lon, direction, vectorLength);
+                    
+                    // Draw vector
+                    const vector = L.polyline([
+                        [closestUSVPoint.lat, closestUSVPoint.lon],
+                        [dest.lat, dest.lon]
+                    ], {
+                        color: '#dc3545',
+                        weight: 2,
+                        opacity: 0.8
+                    }).addTo(map);
+                    usblBearingVectors.push(vector);
+                });
+            }
+            
+            // Update bounds from both datasets
+            const allLats = [];
+            const allLons = [];
+            filteredUSVData.forEach(p => { allLats.push(p.lat); allLons.push(p.lon); });
+            filteredAUVData.forEach(p => { allLats.push(p.lat); allLons.push(p.lon); });
+            
+            if (allLats.length > 0) {
+                // Use loops to avoid stack overflow with large arrays
+                let minLat = Infinity;
+                let maxLat = -Infinity;
+                let minLon = Infinity;
+                let maxLon = -Infinity;
+                for (let i = 0; i < allLats.length; i++) {
+                    if (allLats[i] < minLat) minLat = allLats[i];
+                    if (allLats[i] > maxLat) maxLat = allLats[i];
+                }
+                for (let i = 0; i < allLons.length; i++) {
+                    if (allLons[i] < minLon) minLon = allLons[i];
+                    if (allLons[i] > maxLon) maxLon = allLons[i];
+                }
+                
+                map.fitBounds([
+                    [minLat, minLon],
+                    [maxLat, maxLon]
+                ], { padding: [20, 20] });
+            }
         }
         
         // Update map marker based on selected time
@@ -5000,6 +5757,47 @@
             });
         }
         
+        // Trajectory visibility event listeners
+        const showUsvTrajectoryEl = document.getElementById('show-usv-trajectory');
+        if (showUsvTrajectoryEl) {
+            showUsvTrajectoryEl.addEventListener('change', (e) => {
+                showUsvTrajectory = e.target.checked;
+                updateMapTrajectory();
+            });
+        }
+        
+        const showAuvTrajectoryEl = document.getElementById('show-auv-trajectory');
+        if (showAuvTrajectoryEl) {
+            showAuvTrajectoryEl.addEventListener('change', (e) => {
+                showAuvTrajectory = e.target.checked;
+                updateMapTrajectory();
+            });
+        }
+        
+        const showUsvHeadingEl = document.getElementById('show-usv-heading');
+        if (showUsvHeadingEl) {
+            showUsvHeadingEl.addEventListener('change', (e) => {
+                showUsvHeading = e.target.checked;
+                updateMapTrajectory();
+            });
+        }
+        
+        const showUsblBearingEl = document.getElementById('show-usbl-bearing');
+        if (showUsblBearingEl) {
+            showUsblBearingEl.addEventListener('change', (e) => {
+                showUsblBearing = e.target.checked;
+                updateMapTrajectory();
+            });
+        }
+        
+        // Reset time button (resets time range and all Y-axis zooms)
+        const resetTimeEl = document.getElementById('reset-time');
+        if (resetTimeEl) {
+            resetTimeEl.addEventListener('click', () => {
+                resetZoom(true, true);
+            });
+        }
+        
         // Initialize display range with run times immediately
         if (runStartTime && runEndTime) {
             displayStartTime = runStartTime.getTime();
@@ -5037,7 +5835,12 @@
             await loadUSVOrderData();
             console.log('loadAllData: USV Order data loaded');
             await loadUSVPositionData();
+            await loadAUVPositionData();
             console.log('loadAllData: USV Position data loaded');
+            await loadUSVHeadingData();
+            console.log('loadAllData: USV Heading data loaded');
+            await loadRunSettings();
+            console.log('loadAllData: Run settings loaded');
             
             // Ensure all canvases are properly sized
             resizeCanvas();

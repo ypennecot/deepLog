@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepLog - Settings Logs</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .nav-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 20px;
+        }
+        
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            color: #333;
+            background: #f8f9fa;
+        }
+        
+        .tab.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error-message {
+            padding: 20px;
+            background: #f8d7da;
+            color: #721c24;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .no-data {
+            padding: 40px;
+            text-align: center;
+            color: #666;
+        }
+        
+        /* Table */
+        .table-wrapper {
+            overflow-x: auto;
+            max-width: 100%;
+            margin-top: 20px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            min-width: 800px;
+        }
+        
+        thead {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        th {
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+            white-space: nowrap;
+        }
+        
+        th.setting-name {
+            position: sticky;
+            left: 0;
+            background: #f8f9fa;
+            z-index: 11;
+            min-width: 200px;
+            border-right: 2px solid #dee2e6;
+        }
+        
+        th.column-header {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            height: 150px;
+            min-width: 30px;
+            max-width: 30px;
+            padding: 4px 6px;
+            vertical-align: bottom;
+            text-align: center;
+        }
+        
+        th.column-header .header-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 100%;
+            gap: 4px;
+        }
+        
+        th.column-header .run-filename {
+            font-size: 11px;
+            line-height: 1.2;
+        }
+        
+        th.column-header .run-header {
+            font-size: 10px;
+            line-height: 1.1;
+        }
+        
+        td {
+            padding: 8px 4px;
+            border-bottom: 1px solid #e9ecef;
+            white-space: nowrap;
+            font-size: 12px;
+        }
+        
+        td.setting-value {
+            max-width: 80px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        td.setting-name {
+            position: sticky;
+            left: 0;
+            background: white;
+            z-index: 9;
+            font-weight: 500;
+            color: #495057;
+            border-right: 2px solid #e9ecef;
+        }
+        
+        tr:hover td.setting-name {
+            background: #f8f9fa;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .run-header {
+            font-size: 12px;
+            color: #666;
+            font-weight: normal;
+        }
+        
+        .run-filename {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .setting-value {
+            font-family: 'Courier New', monospace;
+            color: #495057;
+        }
+        
+        .setting-value.null {
+            color: #adb5bd;
+            font-style: italic;
+        }
+        
+        .category-header {
+            background: #e9ecef !important;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .category-header td {
+            padding: 8px;
+            border-bottom: 2px solid #dee2e6;
+        }
+        
+        /* Filter button */
+        .filter-controls {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .filter-button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        .filter-button:hover {
+            background: #0056b3;
+        }
+        
+        .filter-button.active {
+            background: #28a745;
+        }
+        
+        .filter-button.active:hover {
+            background: #218838;
+        }
+        
+        /* Hide rows that are identical */
+        tr.hide-identical {
+            display: none;
+        }
+        
+        /* Collapsible settings groups */
+        .settings-group-header {
+            cursor: pointer;
+            user-select: none;
+            background: #e9ecef !important;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .settings-group-header:hover {
+            background: #dee2e6 !important;
+        }
+        
+        .settings-group-toggle {
+            display: inline-block;
+            width: 20px;
+            text-align: center;
+            margin-right: 8px;
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .settings-group-content {
+            /* Contenu du groupe - visible par défaut */
+        }
+        
+        .settings-group-content.collapsed {
+            display: none;
+        }
+        
+        .settings-group-row {
+            /* Lignes à l'intérieur d'un groupe */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="nav-link">← Retour à l'accueil</a>
+        <h1>Settings Logs</h1>
+        <p class="subtitle">Comparaison des settings entre les différents runs</p>
+        
+        <div class="tabs">
+            <button class="tab active" data-vehicle="AUV">AUV</button>
+            <button class="tab" data-vehicle="USV">USV</button>
+        </div>
+        
+        <div id="filter-controls-auv" class="filter-controls" style="display: none;">
+            <button class="filter-button" id="filter-diff-btn-auv" onclick="toggleFilter('AUV')">
+                Afficher uniquement les différences
+            </button>
+        </div>
+        
+        <div id="filter-controls-usv" class="filter-controls" style="display: none;">
+            <button class="filter-button" id="filter-diff-btn-usv" onclick="toggleFilter('USV')">
+                Afficher uniquement les différences
+            </button>
+        </div>
+        
+        <div id="tab-auv" class="tab-content active">
+            <div class="loading">Chargement des settings AUV...</div>
+        </div>
+        
+        <div id="tab-usv" class="tab-content">
+            <div class="loading">Chargement des settings USV...</div>
+        </div>
+    </div>
+    
+    <script>
+        let currentVehicleType = 'AUV';
+        let settingsData = {
+            'AUV': null,
+            'USV': null
+        };
+        
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const vehicle = tab.dataset.vehicle;
+                switchTab(vehicle);
+            });
+        });
+        
+        function switchTab(vehicleType) {
+            currentVehicleType = vehicleType;
+            
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(t => {
+                t.classList.remove('active');
+            });
+            document.querySelector(`.tab[data-vehicle="${vehicleType}"]`).classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(tc => {
+                tc.classList.remove('active');
+            });
+            document.getElementById(`tab-${vehicleType.toLowerCase()}`).classList.add('active');
+            
+            // Show/hide filter controls
+            document.getElementById(`filter-controls-auv`).style.display = vehicleType === 'AUV' ? 'flex' : 'none';
+            document.getElementById(`filter-controls-usv`).style.display = vehicleType === 'USV' ? 'flex' : 'none';
+            
+            // Load data if not already loaded
+            if (!settingsData[vehicleType]) {
+                loadSettings(vehicleType);
+            } else {
+                renderTable(vehicleType, settingsData[vehicleType]);
+            }
+        }
+        
+        // Check if a row has different values across columns
+        function hasDifferences(rowValues) {
+            // Filter out null/undefined values for comparison
+            const nonNullValues = rowValues.filter(v => v !== null && v !== undefined);
+            
+            // If less than 2 non-null values, no differences possible
+            if (nonNullValues.length < 2) {
+                return false;
+            }
+            
+            // Convert all values to strings for comparison (normalize)
+            const normalizedValues = nonNullValues.map(v => {
+                const str = String(v).trim();
+                // Try to parse as number and normalize
+                const num = parseFloat(str);
+                if (!isNaN(num) && isFinite(num)) {
+                    // Normalize numbers to avoid precision issues
+                    return num.toPrecision(10);
+                }
+                return str;
+            });
+            
+            // Check if all values are the same
+            const firstValue = normalizedValues[0];
+            return !normalizedValues.every(v => v === firstValue);
+        }
+        
+        // Toggle filter to show only rows with differences
+        function toggleFilter(vehicleType) {
+            const button = document.getElementById(`filter-diff-btn-${vehicleType.toLowerCase()}`);
+            const table = document.querySelector(`#tab-${vehicleType.toLowerCase()} table tbody`);
+            
+            if (!table) return;
+            
+            const isActive = button.classList.contains('active');
+            
+            if (isActive) {
+                // Remove filter - show all rows
+                button.classList.remove('active');
+                button.textContent = 'Afficher uniquement les différences';
+                table.querySelectorAll('tr').forEach(tr => {
+                    tr.classList.remove('hide-identical');
+                });
+            } else {
+                // Apply filter - hide identical rows
+                button.classList.add('active');
+                button.textContent = 'Afficher toutes les lignes';
+                
+                // Get all data rows (exclude category headers)
+                const rows = table.querySelectorAll('tr:not(.category-header)');
+                
+                rows.forEach(tr => {
+                    // Get all values in this row using data-original-value attribute
+                    const cells = tr.querySelectorAll('td.setting-value');
+                    const rowValues = Array.from(cells).map(cell => {
+                        const originalValue = cell.getAttribute('data-original-value');
+                        return originalValue || cell.textContent.trim();
+                    });
+                    
+                    // Check if row has differences
+                    if (!hasDifferences(rowValues)) {
+                        tr.classList.add('hide-identical');
+                    } else {
+                        tr.classList.remove('hide-identical');
+                    }
+                });
+            }
+        }
+        
+        async function loadSettings(vehicleType) {
+            const tabContent = document.getElementById(`tab-${vehicleType.toLowerCase()}`);
+            tabContent.innerHTML = '<div class="loading">Chargement des settings...</div>';
+            
+            try {
+                const response = await fetch(`/api/settings?vehicle_type=${vehicleType}`);
+                const data = await response.json();
+                
+                settingsData[vehicleType] = data;
+                renderTable(vehicleType, data);
+                
+                // Show filter controls after data is loaded
+                document.getElementById(`filter-controls-${vehicleType.toLowerCase()}`).style.display = 'flex';
+            } catch (error) {
+                tabContent.innerHTML = `<div class="error-message">Erreur lors du chargement: ${error.message}</div>`;
+            }
+        }
+        
+        // Parse a value to a number if possible
+        function parseNumericValue(value) {
+            if (value === null || value === undefined || value === '—') {
+                return null;
+            }
+            const str = String(value).trim();
+            // Try to parse as float
+            const num = parseFloat(str);
+            if (!isNaN(num) && isFinite(num)) {
+                return num;
+            }
+            return null;
+        }
+        
+        // Calculate row statistics (mean and standard deviation)
+        function calculateRowStats(rowValues) {
+            const numericValues = rowValues
+                .map(parseNumericValue)
+                .filter(v => v !== null);
+            
+            if (numericValues.length === 0) {
+                return { mean: null, stdDev: null, hasNumeric: false };
+            }
+            
+            if (numericValues.length === 1) {
+                return { mean: numericValues[0], stdDev: 0, hasNumeric: true };
+            }
+            
+            // Calculate mean
+            const mean = numericValues.reduce((sum, val) => sum + val, 0) / numericValues.length;
+            
+            // Calculate standard deviation
+            const variance = numericValues.reduce((sum, val) => {
+                const diff = val - mean;
+                return sum + (diff * diff);
+            }, 0) / numericValues.length;
+            const stdDev = Math.sqrt(variance);
+            
+            return { mean, stdDev: stdDev || 0.0001, hasNumeric: true }; // Use small value if stdDev is 0
+        }
+        
+        // Format a value to maximum 4 significant digits
+        function formatValue(value) {
+            if (value === null || value === undefined || value === '—') {
+                return '—';
+            }
+            
+            const str = String(value).trim();
+            
+            // Try to parse as number
+            const num = parseFloat(str);
+            if (!isNaN(num) && isFinite(num)) {
+                // Format to 4 significant digits
+                // Use toPrecision for significant digits, but handle edge cases
+                if (num === 0) {
+                    return '0';
+                }
+                
+                // Count significant digits
+                const absNum = Math.abs(num);
+                let precision = 4;
+                
+                // For very large or very small numbers, adjust precision
+                if (absNum >= 1e6 || absNum < 0.0001) {
+                    // Use scientific notation for very large/small numbers
+                    return num.toExponential(3); // 3 digits after decimal in scientific notation
+                }
+                
+                // For regular numbers, use toPrecision(4)
+                const formatted = num.toPrecision(4);
+                
+                // Remove trailing zeros and decimal point if not needed
+                return formatted.replace(/\.?0+$/, '');
+            }
+            
+            // Not a number, return as string (truncate if too long)
+            if (str.length > 15) {
+                return str.substring(0, 12) + '...';
+            }
+            return str;
+        }
+        
+        // Get color for a value based on its distance from the mean
+        function getColorForValue(value, mean, stdDev) {
+            if (mean === null || stdDev === null) {
+                return null; // No color for non-numeric rows
+            }
+            
+            const numValue = parseNumericValue(value);
+            if (numValue === null) {
+                return null; // No color for non-numeric values
+            }
+            
+            // Calculate absolute distance from mean
+            const distance = Math.abs(numValue - mean);
+            
+            // Normalize distance using standard deviation
+            // Use a factor to make the color gradient smoother
+            const normalizedDistance = stdDev > 0 ? Math.min(distance / (stdDev * 2), 1) : 0;
+            
+            // Map to color: 0 = green (120°), 1 = red (0°)
+            // Use HSL for smooth gradient
+            // Green (120°) transitions to yellow (60°) to red (0°)
+            const hue = 120 - (normalizedDistance * 120);
+            
+            // Saturation: increase with distance for more vibrant colors
+            const saturation = 50 + (normalizedDistance * 50); // 50% to 100%
+            
+            // Lightness: keep it light for readability
+            const lightness = 90 - (normalizedDistance * 20); // 90% to 70%
+            
+            return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        }
+        
+        function renderTable(vehicleType, data) {
+            const tabContent = document.getElementById(`tab-${vehicleType.toLowerCase()}`);
+            
+            if (!data.settings_files || data.settings_files.length === 0) {
+                tabContent.innerHTML = `
+                    <div class="no-data">
+                        <p>Aucun fichier de settings trouvé pour ${vehicleType}</p>
+                        ${vehicleType === 'USV' ? '<p><em>Note: Les settings USV ne sont pas importés actuellement.</em></p>' : '<p><em>Vérifiez que les fichiers de settings ont bien été importés avec le statut "completed".</em></p>'}
+                        <p><small>Données reçues: ${JSON.stringify(data).substring(0, 200)}...</small></p>
+                    </div>
+                `;
+                return;
+            }
+            
+            if (!data.all_setting_names || data.all_setting_names.length === 0) {
+                tabContent.innerHTML = `
+                    <div class="no-data">
+                        <p>Aucun setting trouvé dans les fichiers de settings ${vehicleType}</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Debug: log settings_groups if available
+            console.log('Settings groups:', data.settings_groups);
+            console.log('All setting names:', data.all_setting_names);
+            console.log('Settings matrix keys:', Object.keys(data.settings_matrix || {}));
+            
+            // Group settings by category (if available)
+            const settingsByCategory = {};
+            const uncategorized = [];
+            
+            // Track which settings belong to groups
+            const settingsInGroups = new Set();
+            const settingsGroups = data.settings_groups || {};
+            
+            // Add all settings from groups to the set
+            Object.values(settingsGroups).forEach(groupSettings => {
+                groupSettings.forEach(settingName => {
+                    settingsInGroups.add(settingName);
+                });
+            });
+            
+            data.all_setting_names.forEach(settingName => {
+                // Skip settings that are in groups (they will be rendered separately)
+                if (settingsInGroups.has(settingName)) {
+                    return;
+                }
+                
+                // Try to determine category from setting name
+                let category = 'other';
+                if (settingName.startsWith('COMPASS_')) category = 'compass';
+                else if (settingName.startsWith('INS_')) category = 'ins';
+                else if (settingName.startsWith('GPS_')) category = 'gps';
+                else if (settingName.startsWith('BATT_')) category = 'battery';
+                else if (['vehicle', 'camera', 'api', 'navigation', 'usbl', 'seaker', 'follow', 'Emergency'].includes(settingName)) category = 'configuration';
+                else category = 'other';
+                
+                if (!settingsByCategory[category]) {
+                    settingsByCategory[category] = [];
+                }
+                settingsByCategory[category].push(settingName);
+            });
+            
+            // Build table HTML
+            let html = '<div class="table-wrapper"><table><thead><tr>';
+            html += '<th class="setting-name">Setting Name</th>';
+            
+            // Use settings_files instead of runs as columns
+            const columns = data.settings_files || [];
+            columns.forEach(sf => {
+                // Format date and time from timestamp
+                let dateTimeHtml = '';
+                if (sf.file_timestamp) {
+                    const date = new Date(sf.file_timestamp);
+                    const dateStr = date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    dateTimeHtml = `<div class="run-header">${dateStr}</div><div class="run-header">${timeStr}</div>`;
+                }
+                
+                html += `<th class="column-header">
+                    <div class="header-content">
+                        ${dateTimeHtml}
+                        ${sf.vehicle_id ? `<div class="run-header">${sf.vehicle_id}</div>` : ''}
+                    </div>
+                </th>`;
+            });
+            
+            html += '</tr></thead><tbody>';
+            
+            // Helper function to render a setting row
+            function renderSettingRow(settingName) {
+                // Get all values for this row
+                const rowValues = columns.map(sf => {
+                    const settingsFileKey = `settings_file_${sf.settings_file_id}`;
+                    return data.settings_matrix[settingName]?.[settingsFileKey];
+                });
+                
+                // Calculate statistics for this row
+                const stats = calculateRowStats(rowValues);
+                
+                html += '<tr class="settings-group-row">';
+                html += `<td class="setting-name">${settingName}</td>`;
+                
+                columns.forEach((sf, index) => {
+                    const settingsFileKey = `settings_file_${sf.settings_file_id}`;
+                    const value = data.settings_matrix[settingName]?.[settingsFileKey];
+                    const valueClass = value === null || value === undefined ? 'null' : '';
+                    const displayValue = formatValue(value);
+                    
+                    // Get color for this cell
+                    const backgroundColor = getColorForValue(value, stats.mean, stats.stdDev);
+                    const styleAttr = backgroundColor ? `style="background-color: ${backgroundColor};"` : '';
+                    
+                    // Add title with full value for hover tooltip (store original value for filtering)
+                    const titleAttr = value !== null && value !== undefined ? `title="${String(value)}"` : '';
+                    
+                    html += `<td class="setting-value ${valueClass}" ${styleAttr} ${titleAttr} data-original-value="${value !== null && value !== undefined ? String(value) : ''}">${displayValue}</td>`;
+                });
+                
+                html += '</tr>';
+            }
+            
+            // Render settings groups FIRST (collapsible sections) - before all other categories
+            const groupOrder = ['camera', 'api', 'navigation', 'usbl', 'seaker', 'follow', 'Emergency'];
+            let hasGroups = false;
+            
+            // Debug: check what groups we have
+            console.log('Available groups:', Object.keys(settingsGroups));
+            console.log('Settings groups data:', settingsGroups);
+            
+            groupOrder.forEach(groupName => {
+                // Check if group exists and has settings (including the original entry)
+                // Try both exact match and case-insensitive match
+                let groupSettings = settingsGroups[groupName] || [];
+                let actualGroupName = groupName;
+                
+                if (groupSettings.length === 0) {
+                    // Try case-insensitive match
+                    const groupNameLower = groupName.toLowerCase();
+                    for (const key in settingsGroups) {
+                        if (key.toLowerCase() === groupNameLower) {
+                            groupSettings = settingsGroups[key];
+                            actualGroupName = key;
+                            break;
+                        }
+                    }
+                }
+                
+                if (groupSettings.length > 0) {
+                    hasGroups = true;
+                    console.log(`Rendering group ${actualGroupName} with ${groupSettings.length} settings:`, groupSettings);
+                    const groupId = `group-${actualGroupName}-${vehicleType.toLowerCase()}`;
+                    // Group header (collapsible)
+                    html += `<tr class="settings-group-header" onclick="toggleGroup('${groupId}')">`;
+                    html += `<td colspan="${columns.length + 1}">`;
+                    html += `<span class="settings-group-toggle" id="toggle-${groupId}">−</span>`;
+                    html += `<strong>${actualGroupName.toUpperCase()}</strong>`;
+                    html += `</td></tr>`;
+                    
+                    // Group content (rows with class for toggling)
+                    groupSettings.sort().forEach(settingName => {
+                        html += `<tr class="settings-group-content ${groupId}">`;
+                        // Get all values for this row
+                        const rowValues = columns.map(sf => {
+                            const settingsFileKey = `settings_file_${sf.settings_file_id}`;
+                            return data.settings_matrix[settingName]?.[settingsFileKey];
+                        });
+                        
+                        // Calculate statistics for this row
+                        const stats = calculateRowStats(rowValues);
+                        
+                        html += `<td class="setting-name">${settingName}</td>`;
+                        
+                        columns.forEach((sf, index) => {
+                            const settingsFileKey = `settings_file_${sf.settings_file_id}`;
+                            const value = data.settings_matrix[settingName]?.[settingsFileKey];
+                            const valueClass = value === null || value === undefined ? 'null' : '';
+                            const displayValue = formatValue(value);
+                            
+                            // Get color for this cell
+                            const backgroundColor = getColorForValue(value, stats.mean, stats.stdDev);
+                            const styleAttr = backgroundColor ? `style="background-color: ${backgroundColor};"` : '';
+                            
+                            // Add title with full value for hover tooltip (store original value for filtering)
+                            const titleAttr = value !== null && value !== undefined ? `title="${String(value)}"` : '';
+                            
+                            html += `<td class="setting-value ${valueClass}" ${styleAttr} ${titleAttr} data-original-value="${value !== null && value !== undefined ? String(value) : ''}">${displayValue}</td>`;
+                        });
+                        
+                        html += '</tr>';
+                    });
+                }
+            });
+            
+            // Render settings grouped by category (non-grouped settings) - AFTER groups
+            const categoryOrder = ['compass', 'ins', 'gps', 'battery', 'configuration', 'other'];
+            categoryOrder.forEach(category => {
+                if (settingsByCategory[category] && settingsByCategory[category].length > 0) {
+                    // Category header
+                    html += `<tr class="category-header"><td colspan="${columns.length + 1}">${category.toUpperCase()}</td></tr>`;
+                    
+                    // Settings in this category
+                    settingsByCategory[category].sort().forEach(settingName => {
+                        renderSettingRow(settingName);
+                    });
+                }
+            });
+            
+            html += '</tbody></table></div>';
+            
+            tabContent.innerHTML = html;
+        }
+        
+        // Toggle group collapse/expand
+        function toggleGroup(groupId) {
+            const toggleButton = document.getElementById(`toggle-${groupId}`);
+            const groupRows = document.querySelectorAll(`tr.settings-group-content.${groupId}`);
+            
+            if (!toggleButton || groupRows.length === 0) return;
+            
+            const isCollapsed = toggleButton.textContent === '+';
+            
+            if (isCollapsed) {
+                // Expand
+                toggleButton.textContent = '−';
+                groupRows.forEach(row => {
+                    row.classList.remove('collapsed');
+                });
+            } else {
+                // Collapse
+                toggleButton.textContent = '+';
+                groupRows.forEach(row => {
+                    row.classList.add('collapsed');
+                });
+            }
+        }
+        
+        // Load initial data
+        loadSettings('AUV');
+    </script>
+</body>
+</html>
