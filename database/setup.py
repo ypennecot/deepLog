@@ -13,10 +13,7 @@ load_dotenv()
 
 def get_db_connection():
     """Get database connection from environment variables."""
-    db_user = os.getenv('DB_USER')
-    if not db_user or db_user == 'postgres':
-        # Use system user as default for Homebrew PostgreSQL
-        db_user = os.getenv('USER', 'user')
+    db_user = os.getenv('DB_USER', 'postgres')
     
     return psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),
@@ -28,10 +25,7 @@ def get_db_connection():
 
 def create_database():
     """Create the database if it doesn't exist."""
-    db_user = os.getenv('DB_USER')
-    if not db_user or db_user == 'postgres':
-        # Use system user as default for Homebrew PostgreSQL
-        db_user = os.getenv('USER', 'user')
+    db_user = os.getenv('DB_USER', 'postgres')
     
     conn = psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),
@@ -61,12 +55,23 @@ def setup_schema():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    timescaledb_available = False
     try:
-        # Enable TimescaleDB extension
+        # Enable TimescaleDB extension (optional)
         print("Enabling TimescaleDB extension...")
-        cursor.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
-        conn.commit()
-        print("✓ TimescaleDB extension enabled")
+        try:
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+            conn.commit()
+            print("[OK] TimescaleDB extension enabled")
+            timescaledb_available = True
+        except psycopg2.errors.FeatureNotSupported:
+            conn.rollback()
+            print("[WARNING] TimescaleDB extension not available. Continuing without it.")
+            print("  To install TimescaleDB, see: https://docs.timescale.com/install/latest/self-hosted/")
+        except Exception as e:
+            conn.rollback()
+            print(f"[WARNING] Could not enable TimescaleDB: {e}")
+            print("  Continuing without TimescaleDB extension.")
         
         # 1. Create log_files table
         print("Creating log_files table...")
@@ -103,7 +108,7 @@ def setup_schema():
             ON log_files(filename, vehicle_type, vehicle_id);
         """)
         conn.commit()
-        print("✓ log_files table created")
+        print("[OK] log_files table created")
         
         # 2. Create data_type_catalog table (MUST be before log_entries)
         print("Creating data_type_catalog table...")
@@ -131,7 +136,7 @@ def setup_schema():
             CREATE UNIQUE INDEX IF NOT EXISTS idx_data_type_catalog_name_unique ON data_type_catalog(data_type);
         """)
         conn.commit()
-        print("✓ data_type_catalog table created")
+        print("[OK] data_type_catalog table created")
         
         # 3. Create log_entries table (optimized with data_type_id)
         print("Creating log_entries table...")
@@ -147,18 +152,26 @@ def setup_schema():
             );
         """)
         conn.commit()
-        print("✓ log_entries table created")
+        print("[OK] log_entries table created")
         
-        # Convert to TimescaleDB hypertable
-        print("Converting log_entries to TimescaleDB hypertable...")
-        cursor.execute("""
-            SELECT create_hypertable('log_entries', 'time', 
-                chunk_time_interval => INTERVAL '1 day',
-                if_not_exists => TRUE
-            );
-        """)
-        conn.commit()
-        print("✓ log_entries converted to hypertable")
+        # Convert to TimescaleDB hypertable (only if TimescaleDB is available)
+        if timescaledb_available:
+            print("Converting log_entries to TimescaleDB hypertable...")
+            try:
+                cursor.execute("""
+                    SELECT create_hypertable('log_entries', 'time', 
+                        chunk_time_interval => INTERVAL '1 day',
+                        if_not_exists => TRUE
+                    );
+                """)
+                conn.commit()
+                print("[OK] log_entries converted to hypertable")
+            except Exception as e:
+                conn.rollback()
+                print(f"[WARNING] Could not create hypertable: {e}")
+                print("  Continuing with regular table (no TimescaleDB features).")
+        else:
+            print("[INFO] Skipping hypertable conversion (TimescaleDB not available)")
         
         # Create indexes for log_entries
         print("Creating indexes for log_entries...")
@@ -178,7 +191,7 @@ def setup_schema():
             CREATE INDEX IF NOT EXISTS idx_log_entries_query_optimized ON log_entries(vehicle_type, data_type_id, time DESC);
         """)
         conn.commit()
-        print("✓ Indexes created for log_entries")
+        print("[OK] Indexes created for log_entries")
         
         # 4. Create settings_files table
         print("Creating settings_files table...")
@@ -212,7 +225,7 @@ def setup_schema():
             CREATE INDEX IF NOT EXISTS idx_settings_files_import_status ON settings_files(import_status);
         """)
         conn.commit()
-        print("✓ settings_files table created")
+        print("[OK] settings_files table created")
         
         # 5. Create vehicle_settings table
         print("Creating vehicle_settings table...")
@@ -241,7 +254,7 @@ def setup_schema():
             CREATE INDEX IF NOT EXISTS idx_vehicle_settings_name_category ON vehicle_settings(setting_name, category);
         """)
         conn.commit()
-        print("✓ vehicle_settings table created")
+        print("[OK] vehicle_settings table created")
         
         # 6. Create usbl_decoded_messages table
         print("Creating usbl_decoded_messages table...")
@@ -264,7 +277,7 @@ def setup_schema():
             CREATE INDEX IF NOT EXISTS idx_usbl_raw_data_timestamp ON usbl_raw_data(timestamp DESC);
         """)
         conn.commit()
-        print("✓ usbl_raw_data table created")
+        print("[OK] usbl_raw_data table created")
         
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usbl_decoded_messages (
@@ -302,7 +315,65 @@ def setup_schema():
             CREATE INDEX IF NOT EXISTS idx_usbl_decoded_direction ON usbl_decoded_messages(direction);
         """)
         conn.commit()
-        print("✓ usbl_decoded_messages table created")
+        print("[OK] usbl_decoded_messages table created")
+        
+        # Create videos table
+        print("Creating videos table...")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS videos (
+                id SERIAL PRIMARY KEY,
+                filename VARCHAR(500) NOT NULL,
+                file_path TEXT NOT NULL,
+                start_time TIMESTAMPTZ,
+                time_offset_seconds DOUBLE PRECISION DEFAULT 0.0,
+                effective_start_time TIMESTAMPTZ,
+                duration_seconds DOUBLE PRECISION,
+                thumbnail_status VARCHAR(20) DEFAULT 'pending' CHECK (thumbnail_status IN ('pending', 'processing', 'completed', 'failed')),
+                run_id INTEGER REFERENCES log_files(id) ON DELETE SET NULL,
+                camera_id VARCHAR(50),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        
+        # Create function to calculate effective_start_time
+        cursor.execute("""
+            CREATE OR REPLACE FUNCTION calculate_effective_start_time()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF NEW.start_time IS NOT NULL AND NEW.time_offset_seconds IS NOT NULL THEN
+                    NEW.effective_start_time := NEW.start_time + (NEW.time_offset_seconds || ' seconds')::INTERVAL;
+                ELSE
+                    NEW.effective_start_time := NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        
+        # Create trigger to automatically update effective_start_time
+        cursor.execute("""
+            DROP TRIGGER IF EXISTS update_effective_start_time ON videos;
+        """)
+        cursor.execute("""
+            CREATE TRIGGER update_effective_start_time
+            BEFORE INSERT OR UPDATE OF start_time, time_offset_seconds ON videos
+            FOR EACH ROW
+            EXECUTE FUNCTION calculate_effective_start_time();
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_videos_run_id ON videos(run_id);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_videos_effective_start_time ON videos(effective_start_time);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_videos_camera_id ON videos(camera_id);
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_videos_thumbnail_status ON videos(thumbnail_status);
+        """)
+        conn.commit()
+        print("[OK] videos table created")
         
         # Set up compression policy (optional - requires columnstore to be enabled)
         # For now, we'll skip compression policy as it requires additional configuration
@@ -314,13 +385,13 @@ def setup_schema():
         # """)
         # conn.commit()
         # print("✓ Compression policy configured")
-        print("⚠️  Compression policy skipped (can be enabled later if needed)")
+        print("[WARNING] Compression policy skipped (can be enabled later if needed)")
         
-        print("\n✅ Database schema setup completed successfully!")
+        print("\n[SUCCESS] Database schema setup completed successfully!")
         
     except Exception as e:
         conn.rollback()
-        print(f"\n❌ Error setting up schema: {e}")
+        print(f"\n[ERROR] Error setting up schema: {e}")
         raise
     finally:
         cursor.close()

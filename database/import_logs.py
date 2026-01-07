@@ -21,21 +21,33 @@ try:
 except ImportError:
     # Fall back to absolute import (when database is in sys.path)
     from decode_usbl import decode_usbl_message, convert_kogger_state_to_seaker
-from antenna_driver_analysis.kogger_usbl_decoder import (
-    decode_usbl_message_from_csv,
-    parse_bytes_from_string,
-    reassemble_received_messages,
-    parse_message
-)
+
+# Optional import for antenna_driver_analysis - only needed for USBL decoding
+try:
+    from antenna_driver_analysis.kogger_usbl_decoder import (
+        decode_usbl_message_from_csv,
+        parse_bytes_from_string,
+        reassemble_received_messages,
+        parse_message
+    )
+    ANTENNA_DRIVER_AVAILABLE = True
+except ImportError:
+    ANTENNA_DRIVER_AVAILABLE = False
+    # Define stub functions to avoid NameError
+    def decode_usbl_message_from_csv(*args, **kwargs):
+        raise ImportError("antenna_driver_analysis module not installed. Install it to enable USBL decoding.")
+    def parse_bytes_from_string(*args, **kwargs):
+        raise ImportError("antenna_driver_analysis module not installed. Install it to enable USBL decoding.")
+    def reassemble_received_messages(*args, **kwargs):
+        raise ImportError("antenna_driver_analysis module not installed. Install it to enable USBL decoding.")
+    def parse_message(*args, **kwargs):
+        raise ImportError("antenna_driver_analysis module not installed. Install it to enable USBL decoding.")
 
 load_dotenv()
 
 def get_db_connection():
     """Get database connection."""
-    db_user = os.getenv('DB_USER')
-    if not db_user or db_user == 'postgres':
-        # Use system user as default for Homebrew PostgreSQL
-        db_user = os.getenv('USER', 'user')
+    db_user = os.getenv('DB_USER', 'postgres')
     
     return psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),
@@ -507,6 +519,28 @@ def import_usbl_file(file_path, conn, file_progress=None):
                         last_direction = direction
                         
                         # Parse data bytes
+                        if not ANTENNA_DRIVER_AVAILABLE:
+                            # Store error message if module not available
+                            decoded_messages.append((
+                                log_file_id,
+                                timestamp,
+                                direction,
+                                None,  # message_id
+                                None,  # message_name
+                                None,  # message_type
+                                None,  # version
+                                None,  # device_address
+                                "Error: antenna_driver_analysis module not installed",  # payload_decoded
+                                data_str,  # payload_raw
+                                None,  # length
+                                None,  # distance
+                                None,  # bearing
+                                None,  # elevation
+                                None,  # snr
+                                None,  # device_id
+                            ))
+                            continue
+                        
                         data_bytes = parse_bytes_from_string(data_str)
                         if data_bytes is None:
                             # Store error message
@@ -532,6 +566,27 @@ def import_usbl_file(file_path, conn, file_progress=None):
                         
                         # Process SENT messages (complete)
                         if direction == 'SENT':
+                            if not ANTENNA_DRIVER_AVAILABLE:
+                                # Store error message if module not available
+                                decoded_messages.append((
+                                    log_file_id,
+                                    timestamp,
+                                    direction,
+                                    None,  # message_id
+                                    None,  # message_name
+                                    None,  # message_type
+                                    None,  # version
+                                    None,  # device_address
+                                    "Error: antenna_driver_analysis module not installed",  # payload_decoded
+                                    data_str,  # payload_raw
+                                    None,  # length
+                                    None,  # distance
+                                    None,  # bearing
+                                    None,  # elevation
+                                    None,  # snr
+                                    None,  # device_id
+                                ))
+                                continue
                             decoded = decode_usbl_message_from_csv(timestamp_str, direction, data_str)
                             if decoded:
                                 decoded_messages.append((
@@ -556,6 +611,28 @@ def import_usbl_file(file_path, conn, file_progress=None):
                         
                         # Process RECEIVED messages (may need reassembly)
                         elif direction == 'RECEIVED':
+                            if not ANTENNA_DRIVER_AVAILABLE:
+                                # Store error message if module not available
+                                decoded_messages.append((
+                                    log_file_id,
+                                    timestamp,
+                                    direction,
+                                    None,  # message_id
+                                    None,  # message_name
+                                    None,  # message_type
+                                    None,  # version
+                                    None,  # device_address
+                                    "Error: antenna_driver_analysis module not installed",  # payload_decoded
+                                    data_str,  # payload_raw
+                                    None,  # length
+                                    None,  # distance
+                                    None,  # bearing
+                                    None,  # elevation
+                                    None,  # snr
+                                    None,  # device_id
+                                ))
+                                continue
+                            
                             complete_messages, received_buffer = reassemble_received_messages(data_bytes, received_buffer)
                             
                             for msg_bytes in complete_messages:
@@ -737,6 +814,28 @@ def import_usbl_file(file_path, conn, file_progress=None):
                     last_direction = direction
                     
                     # Parse data bytes
+                    if not ANTENNA_DRIVER_AVAILABLE:
+                        # Store error message if module not available
+                        decoded_messages.append((
+                            log_file_id,
+                            timestamp,
+                            direction,
+                            None,  # message_id
+                            None,  # message_name
+                            None,  # message_type
+                            None,  # version
+                            None,  # device_address
+                            "Error: antenna_driver_analysis module not installed",  # payload_decoded
+                            data_str,  # payload_raw
+                            None,  # length
+                            None,  # distance
+                            None,  # bearing
+                            None,  # elevation
+                            None,  # snr
+                            None,  # device_id
+                        ))
+                        continue
+                    
                     data_bytes = parse_bytes_from_string(data_str)
                     if data_bytes is None:
                         # Store error message
@@ -762,6 +861,27 @@ def import_usbl_file(file_path, conn, file_progress=None):
                     
                     # Process SENT messages (complete)
                     if direction == 'SENT':
+                        if not ANTENNA_DRIVER_AVAILABLE:
+                            # Store error message if module not available
+                            decoded_messages.append((
+                                log_file_id,
+                                timestamp,
+                                direction,
+                                None,  # message_id
+                                None,  # message_name
+                                None,  # message_type
+                                None,  # version
+                                None,  # device_address
+                                "Error: antenna_driver_analysis module not installed",  # payload_decoded
+                                data_str,  # payload_raw
+                                None,  # length
+                                None,  # distance
+                                None,  # bearing
+                                None,  # elevation
+                                None,  # snr
+                                None,  # device_id
+                            ))
+                            continue
                         decoded = decode_usbl_message_from_csv(timestamp_str, direction, data_str)
                         if decoded:
                             decoded_messages.append((
@@ -786,6 +906,28 @@ def import_usbl_file(file_path, conn, file_progress=None):
                     
                     # Process RECEIVED messages (may need reassembly)
                     elif direction == 'RECEIVED':
+                        if not ANTENNA_DRIVER_AVAILABLE:
+                            # Store error message if module not available
+                            decoded_messages.append((
+                                log_file_id,
+                                timestamp,
+                                direction,
+                                None,  # message_id
+                                None,  # message_name
+                                None,  # message_type
+                                None,  # version
+                                None,  # device_address
+                                "Error: antenna_driver_analysis module not installed",  # payload_decoded
+                                data_str,  # payload_raw
+                                None,  # length
+                                None,  # distance
+                                None,  # bearing
+                                None,  # elevation
+                                None,  # snr
+                                None,  # device_id
+                            ))
+                            continue
+                        
                         complete_messages, received_buffer = reassemble_received_messages(data_bytes, received_buffer)
                         
                         for msg_bytes in complete_messages:

@@ -17,9 +17,7 @@ load_dotenv()
 
 def get_db_connection():
     """Get database connection."""
-    db_user = os.getenv('DB_USER')
-    if not db_user or db_user == 'postgres':
-        db_user = os.getenv('USER', 'user')
+    db_user = os.getenv('DB_USER', 'postgres')
     
     return psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),

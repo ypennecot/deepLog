@@ -4377,19 +4377,6 @@
                 ctx.beginPath();
                 ctx.arc(endX, padding.top + chartHeight / 2, 5, 0, 2 * Math.PI);
                 ctx.fill();
-            } else if (waitingForSecondClick && firstClickTime !== null) {
-                // Show first click point while waiting for second click (don't affect zoom)
-                const firstX = padding.left + ((firstClickTime - minTime) / timeSpan) * chartWidth;
-                ctx.fillStyle = '#ffc107';
-                ctx.beginPath();
-                ctx.arc(firstX, padding.top + chartHeight / 2, 6, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.strokeStyle = '#ff9800';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(firstX, padding.top);
-                ctx.lineTo(firstX, padding.top + chartHeight);
-                ctx.stroke();
             }
             
             // Draw cursor if time is selected (works even when zoomed)
@@ -4425,14 +4412,8 @@
                 }
             }
             
-            // Display time range if waiting for second click (selection in progress)
-            if (waitingForSecondClick && firstClickTime !== null) {
-                const startDate = new Date(firstClickTime);
-                timeRangeDisplay.textContent = `Premier clic: ${startDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })} - Cliquez pour définir la fin`;
-                timeRangeDisplay.classList.add('active');
-            } else {
-                timeRangeDisplay.classList.remove('active');
-            }
+            // Removed double-click logic
+            timeRangeDisplay.classList.remove('active');
             
             // Draw selection box if dragging
             drawSelectionBox(ctx, 'depth', padding);
@@ -4472,13 +4453,12 @@
             };
         }
         
-        // Two-click selection: first click = start, second click = end + zoom
-        let firstClickTime = null;
-        let waitingForSecondClick = false;
-        let cancelTimeout = null;
+        // Pan state for Shift+drag
+        let isPanning = false;
+        let panStartX = null;
+        let panStartTime = null;
         
-        // Expose waitingForSecondClick to window for testing
-        window.waitingForSecondClick = waitingForSecondClick;
+        // Removed double-click logic
         
         // Helper function to convert Y coordinate to value
         function getValueFromYForCanvas(containerEl, y, minValue, maxValue) {
@@ -4905,110 +4885,100 @@
             updateTimeRangeDisplay();
         }
         
-        // Shared zoom handlers for all charts
-        function handleZoomClick(containerEl, x, y) {
-            // Allow clicks outside chart area - use clamped version to calculate time
-            const clickedTime = getTimeFromXForCanvasClamped(containerEl, x);
-            if (clickedTime === null) return;
+        // Function to apply pan (horizontal translation)
+        function applyPan(deltaPixels, containerEl) {
+            if (!containerEl || deltaPixels === 0) return;
             
-            if (!waitingForSecondClick || firstClickTime === null) {
-                // First click - just store the time, don't modify timeRange or graphs
-                firstClickTime = clickedTime;
-                waitingForSecondClick = true;
-                window.waitingForSecondClick = waitingForSecondClick;
-                selectedTime = null;
-                
-                // Clear any existing selection display (all cursor lines)
-                if (cursorLine) cursorLine.style.display = 'none';
-                if (motorsCursorLine) motorsCursorLine.style.display = 'none';
-                if (derivedCursorLine) derivedCursorLine.style.display = 'none';
-                if (stateCursorLine) stateCursorLine.style.display = 'none';
-                if (bearingPingCursorLine) bearingPingCursorLine.style.display = 'none';
-                if (orientationCursorLine) orientationCursorLine.style.display = 'none';
-                if (waterTempCursorLine) waterTempCursorLine.style.display = 'none';
-                if (usvFullAuvCursorLine) usvFullAuvCursorLine.style.display = 'none';
-                if (altitudeCursorLine) altitudeCursorLine.style.display = 'none';
-                if (timeDisplay) timeDisplay.style.display = 'none';
-                
-                // Visual feedback - redraw to show first point indicator
-                drawDepthChart();
-                drawMotorsChart();
-                drawDerivedChart();
-                drawStateChart();
-                drawBearingPingChart();
-                drawOrientationChart();
-                drawWaterTempChart();
-                drawBatteryChart();
-                drawUSVFullAuvChart();
-                drawAltitudeChart();
-                
-                // Set timeout to cancel if no second click within 3 seconds
-                if (cancelTimeout) clearTimeout(cancelTimeout);
-                cancelTimeout = setTimeout(() => {
-                    if (waitingForSecondClick) {
-                        waitingForSecondClick = false;
-                        window.waitingForSecondClick = waitingForSecondClick;
-                        firstClickTime = null;
-                        drawDepthChart();
-                        drawMotorsChart();
-                        drawDerivedChart();
-                        drawStateChart();
-                        drawBearingPingChart();
-                        drawOrientationChart();
-                        drawWaterTempChart();
-                        drawBatteryChart();
-                        drawUSVFullAuvChart();
-                    }
-                }, 3000);
-            } else {
-                // Second click - set end time and zoom
-                const secondClickTime = clickedTime;
-                waitingForSecondClick = false;
-                window.waitingForSecondClick = waitingForSecondClick;
-                if (cancelTimeout) {
-                    clearTimeout(cancelTimeout);
-                    cancelTimeout = null;
-                }
-                
-                // Ensure start < end
-                let startTime, endTime;
-                if (firstClickTime < secondClickTime) {
-                    startTime = firstClickTime;
-                    endTime = secondClickTime;
-                } else {
-                    startTime = secondClickTime;
-                    endTime = firstClickTime;
-                }
-                
-                // Only zoom if duration is meaningful (> 0.1 second)
-                const duration = Math.abs(endTime - startTime);
-                if (duration < 100) {
-                    // Too small, cancel selection
-                    firstClickTime = null;
-                    drawDepthChart();
-                    drawMotorsChart();
-                    drawDerivedChart();
-                    drawStateChart();
-                    drawBearingPingChart();
-                    drawOrientationChart();
-                    drawWaterTempChart();
-                    drawUSVFullAuvChart();
-                } else {
-                    // Update display range (this is the zoom)
-                    displayStartTime = startTime;
-                    displayEndTime = endTime;
-                    window.displayStartTime = displayStartTime;
-                    window.displayEndTime = displayEndTime;
-                    
-                    // Clear temporary selection
-                    timeRange.start = null;
-                    timeRange.end = null;
-                    
-                    // Filter all data based on new display range
-                    filterDataByDisplayRange();
-                    
-                    // Update all charts
-                    calculateDerivedData();
+            // Get current time range
+            const currentTimeSpan = displayEndTime - displayStartTime;
+            
+            // Calculate chart width (excluding padding)
+            const containerRect = containerEl.getBoundingClientRect();
+            const padding = { left: 60, right: 20, top: 20, bottom: 40 };
+            const chartWidth = containerRect.width - padding.left - padding.right;
+            
+            // Convert pixel delta to time delta
+            const timeDelta = (deltaPixels / chartWidth) * currentTimeSpan;
+            
+            // Calculate new time range
+            const newStartTime = displayStartTime - timeDelta;
+            const newEndTime = displayEndTime - timeDelta;
+            
+            // Get full data range to clamp pan
+            let minTime = displayStartTime;
+            let maxTime = displayEndTime;
+            if (depthDataFull && depthDataFull.length > 0) {
+                const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
+                minTime = Math.min(...allTimes);
+                maxTime = Math.max(...allTimes);
+            }
+            
+            // Clamp to data range
+            const clampedStart = Math.max(minTime, Math.min(newStartTime, maxTime - currentTimeSpan));
+            const clampedEnd = Math.min(maxTime, Math.max(newEndTime, minTime + currentTimeSpan));
+            
+            // Apply pan
+            if (clampedStart !== displayStartTime || clampedEnd !== displayEndTime) {
+                applyTimeZoom(clampedStart, clampedEnd);
+            }
+        }
+        
+        // Function to apply wheel zoom (centered on mouse position)
+        function applyWheelZoom(deltaY, x, containerEl) {
+            if (!containerEl) return;
+            
+            // Calculate zoom factor (positive deltaY = zoom out, negative = zoom in)
+            const zoomFactor = deltaY > 0 ? 1.1 : 0.9;
+            
+            // Get current time range
+            const currentTimeSpan = displayEndTime - displayStartTime;
+            
+            // Calculate time under mouse cursor
+            const timeUnderMouse = getTimeFromXForCanvas(containerEl, x);
+            if (timeUnderMouse === null) return;
+            
+            // Calculate new time span
+            const newTimeSpan = currentTimeSpan * zoomFactor;
+            
+            // Calculate how much time is before and after the mouse cursor
+            const containerRect = containerEl.getBoundingClientRect();
+            const padding = { left: 60, right: 20 };
+            const chartWidth = containerRect.width - padding.left - padding.right;
+            const xInChart = x - padding.left;
+            const ratioBeforeMouse = xInChart / chartWidth;
+            
+            const timeBeforeMouse = currentTimeSpan * ratioBeforeMouse;
+            const timeAfterMouse = currentTimeSpan * (1 - ratioBeforeMouse);
+            
+            // Calculate new start and end times keeping the point under mouse fixed
+            const newStartTime = timeUnderMouse - (newTimeSpan * ratioBeforeMouse);
+            const newEndTime = timeUnderMouse + (newTimeSpan * (1 - ratioBeforeMouse));
+            
+            // Get full data range to clamp zoom
+            let minTime = displayStartTime;
+            let maxTime = displayEndTime;
+            if (depthDataFull && depthDataFull.length > 0) {
+                const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
+                minTime = Math.min(...allTimes);
+                maxTime = Math.max(...allTimes);
+            }
+            
+            // Clamp to data range
+            const clampedStart = Math.max(minTime, Math.min(newStartTime, maxTime - newTimeSpan));
+            const clampedEnd = Math.min(maxTime, Math.max(newEndTime, minTime + newTimeSpan));
+            
+            // Apply zoom
+            if (clampedStart !== displayStartTime || clampedEnd !== displayEndTime) {
+                applyTimeZoom(clampedStart, clampedEnd);
+            }
+        }
+        
+        function handleZoomMouseMove(containerEl, x, y) {
+            if (isInChartAreaForCanvas(containerEl, x, y) && !isPanning) {
+                // Show cursor when hovering (works with or without zoom)
+                const currentTime = getTimeFromXForCanvas(containerEl, x);
+                if (currentTime !== null) {
+                    selectedTime = currentTime;
                     drawDepthChart();
                     drawMotorsChart();
                     drawDerivedChart();
@@ -5018,16 +4988,312 @@
                     drawWaterTempChart();
                     drawBatteryChart();
                     drawUSVFullAuvChart();
-                    updateMapTrajectory();
-                    updateTimeRangeDisplay();
+                    drawAltitudeChart();
+                    updateMapMarker();
+                    updateVideoThumbnail();
                 }
-                
-                firstClickTime = null;
             }
         }
         
         function handleZoomMouseMove(containerEl, x, y) {
-            if (isInChartAreaForCanvas(containerEl, x, y) && !waitingForSecondClick) {
+            if (isInChartAreaForCanvas(containerEl, x, y) && !isPanning) {
+                // Show cursor when hovering (works with or without zoom)
+                const currentTime = getTimeFromXForCanvas(containerEl, x);
+                if (currentTime !== null) {
+                    selectedTime = currentTime;
+                    drawDepthChart();
+                    drawMotorsChart();
+                    drawDerivedChart();
+                    drawStateChart();
+                    drawBearingPingChart();
+                    drawOrientationChart();
+                    drawWaterTempChart();
+                    drawBatteryChart();
+                    drawUSVFullAuvChart();
+                    drawAltitudeChart();
+                    updateMapMarker();
+                    updateVideoThumbnail();
+                }
+            }
+        }
+        
+        function handleZoomMouseLeave() {
+            if (!isPanning) {
+                selectedTime = null;
+                // Hide all cursor lines
+                if (cursorLine) cursorLine.style.display = 'none';
+                if (motorsCursorLine) motorsCursorLine.style.display = 'none';
+                if (derivedCursorLine) derivedCursorLine.style.display = 'none';
+                if (stateCursorLine) stateCursorLine.style.display = 'none';
+                if (bearingPingCursorLine) bearingPingCursorLine.style.display = 'none';
+                if (altitudeCursorLine) altitudeCursorLine.style.display = 'none';
+                // Only hide time display if no zoom is active
+                if (timeRange.start === null) {
+                    if (timeDisplay) timeDisplay.style.display = 'none';
+                }
+                drawDepthChart();
+                drawMotorsChart();
+                drawDerivedChart();
+                drawStateChart();
+                drawBearingPingChart();
+                drawOrientationChart();
+                drawWaterTempChart();
+                drawBatteryChart();
+                drawAltitudeChart();
+                if (usvMarker) {
+                    usvMarker.remove();
+                    usvMarker = null;
+                    window.usvMarker = usvMarker;
+                }
+            }
+        }
+        
+        function handleZoomContextMenu() {
+            timeRange.start = null;
+            timeRange.end = null;
+            selectedTime = null;
+            isSelecting = false;
+            selectionStart = null;
+            
+            // Reset display range to full AUV log range
+            if (depthDataFull.length > 0) {
+                const allTimes = depthDataFull.map(d => new Date(d.time).getTime());
+                // Use loop to avoid stack overflow with large arrays
+                let minTime = Infinity;
+                let maxTime = -Infinity;
+                for (let i = 0; i < allTimes.length; i++) {
+                    if (allTimes[i] < minTime) minTime = allTimes[i];
+                    if (allTimes[i] > maxTime) maxTime = allTimes[i];
+                }
+                displayStartTime = minTime;
+                displayEndTime = maxTime;
+                window.displayStartTime = displayStartTime;
+                window.displayEndTime = displayEndTime;
+            } else if (runStartTime && runEndTime) {
+                displayStartTime = runStartTime.getTime();
+                displayEndTime = runEndTime.getTime();
+                window.displayStartTime = displayStartTime;
+                window.displayEndTime = displayEndTime;
+            }
+            
+            // Filter all data based on reset range
+            filterDataByDisplayRange();
+            
+            // Update all charts
+            calculateDerivedData();
+            drawDepthChart();
+            drawMotorsChart();
+            drawDerivedChart();
+            drawStateChart();
+            drawBearingPingChart();
+            drawOrientationChart();
+            drawWaterTempChart();
+            updateMapTrajectory();
+            updateTimeRangeDisplay();
+        }
+        
+        // Helper function to attach zoom event listeners to any canvas
+        function attachZoomListeners(canvasEl, containerEl, chartId) {
+            if (!canvasEl || !containerEl) return;
+            
+            // Store reference to current container for document-level event handlers
+            let currentContainerForDrag = null;
+            let currentChartIdForDrag = null;
+            let currentContainerForPan = null;
+            let currentChartIdForPan = null;
+            
+            // Function to handle mouseup on document (to capture release even outside canvas)
+            const handleDocumentMouseUp = (e) => {
+                if (e.button === 0) {
+                    // Handle zoom box (left click drag without shift)
+                    if (isDragging && currentContainerForDrag && currentChartIdForDrag === chartId && !isPanning) {
+                        const containerRect = currentContainerForDrag.getBoundingClientRect();
+                        const x = e.clientX - containerRect.left;
+                        const y = e.clientY - containerRect.top;
+                        
+                        // Update dragCurrent with final position
+                        if (dragStart) {
+                            dragCurrent = {x, y};
+                        }
+                        
+                        // Apply zoom
+                        if (dragStart && dragCurrent) {
+                            // Use clamped version to allow zoom even when selection box extends beyond chart area
+                            const startTime = getTimeFromXForCanvasClamped(currentContainerForDrag, Math.min(dragStart.x, dragCurrent.x));
+                            const endTime = getTimeFromXForCanvasClamped(currentContainerForDrag, Math.max(dragStart.x, dragCurrent.x));
+                            
+                            // Store Y coordinates before time zoom (they are relative to container, so should remain valid)
+                            const minY = Math.min(dragStart.y, dragCurrent.y);
+                            const maxY = Math.max(dragStart.y, dragCurrent.y);
+                            
+                            // Time zoom (always)
+                            if (startTime && endTime && Math.abs(endTime - startTime) > 100) {
+                                applyTimeZoom(startTime, endTime);
+                            }
+                            
+                            // Value zoom (if Y range is significant)
+                            if (Math.abs(maxY - minY) > 10) { // At least 10 pixels
+                                // Get current value range for this chart
+                                const {min: minValue, max: maxValue} = getCurrentValueRange(chartId);
+                                // Use clamped version to allow zoom even when selection box extends beyond chart area
+                                const startValue = getValueFromYForCanvasClamped(currentContainerForDrag, maxY, minValue, maxValue);
+                                const endValue = getValueFromYForCanvasClamped(currentContainerForDrag, minY, minValue, maxValue);
+                                
+                                if (startValue !== null && endValue !== null && Math.abs(endValue - startValue) > 0.01) {
+                                    const finalMin = Math.min(startValue, endValue);
+                                    const finalMax = Math.max(startValue, endValue);
+                                    applyValueZoom(chartId, finalMin, finalMax);
+                                }
+                            }
+                        }
+                        
+                        isDragging = false;
+                        dragStart = null;
+                        dragCurrent = null;
+                        currentDraggingChart = null;
+                        currentContainerForDrag = null;
+                        currentChartIdForDrag = null;
+                        drawAllCharts();
+                    }
+                    
+                    // Handle pan (shift + left click drag)
+                    if (isPanning && currentContainerForPan && currentChartIdForPan === chartId) {
+                        const containerRect = currentContainerForPan.getBoundingClientRect();
+                        const x = e.clientX - containerRect.left;
+                        
+                        // Calculate pan delta
+                        const deltaX = x - panStartX;
+                        applyPan(deltaX, currentContainerForPan);
+                        
+                        isPanning = false;
+                        panStartX = null;
+                        panStartTime = null;
+                        currentContainerForPan = null;
+                        currentChartIdForPan = null;
+                    }
+                    
+                    // Remove document-level event listeners
+                    document.removeEventListener('mouseup', handleDocumentMouseUp);
+                    document.removeEventListener('mousemove', handleDocumentMouseMove);
+                }
+            };
+            
+            // Function to handle mousemove on document (to capture movement even outside canvas)
+            const handleDocumentMouseMove = (e) => {
+                // Handle zoom box drag
+                if (isDragging && currentContainerForDrag && currentChartIdForDrag === chartId && !isPanning) {
+                    const containerRect = currentContainerForDrag.getBoundingClientRect();
+                    const x = e.clientX - containerRect.left;
+                    const y = e.clientY - containerRect.top;
+                    
+                    dragCurrent = {x, y};
+                    drawChartById(chartId); // Redraw to show selection box
+                }
+                
+                // Handle pan drag
+                if (isPanning && currentContainerForPan && currentChartIdForPan === chartId) {
+                    const containerRect = currentContainerForPan.getBoundingClientRect();
+                    const x = e.clientX - containerRect.left;
+                    
+                    // Calculate pan delta and apply
+                    const deltaX = x - panStartX;
+                    applyPan(deltaX, currentContainerForPan);
+                    
+                    // Update pan start for next move
+                    panStartX = x;
+                }
+            };
+            
+            // Mousedown: start drag (zoom box or pan)
+            canvasEl.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // Only left click
+                
+                const canvasRect = canvasEl.getBoundingClientRect();
+                const containerRect = containerEl.getBoundingClientRect();
+                const x = e.clientX - containerRect.left;
+                const y = e.clientY - containerRect.top;
+                
+                if (e.shiftKey) {
+                    // Shift + left click = Pan
+                    isPanning = true;
+                    currentContainerForPan = containerEl;
+                    currentChartIdForPan = chartId;
+                    panStartX = x;
+                    panStartTime = getTimeFromXForCanvas(containerEl, x);
+                    
+                    // Attach document-level listeners to capture events even outside canvas
+                    document.addEventListener('mouseup', handleDocumentMouseUp);
+                    document.addEventListener('mousemove', handleDocumentMouseMove);
+                } else {
+                    // Left click without shift = Zoom box
+                    isDragging = true;
+                    currentDraggingChart = chartId;
+                    currentContainerForDrag = containerEl;
+                    currentChartIdForDrag = chartId;
+                    dragStart = {x, y, time: getTimeFromXForCanvas(containerEl, x)};
+                    dragCurrent = {x, y};
+                    
+                    // Attach document-level listeners to capture events even outside canvas
+                    document.addEventListener('mouseup', handleDocumentMouseUp);
+                    document.addEventListener('mousemove', handleDocumentMouseMove);
+                }
+                
+                e.preventDefault();
+            });
+            
+            // Mousemove: update drag (for hover when not dragging)
+            canvasEl.addEventListener('mousemove', (e) => {
+                const canvasRect = canvasEl.getBoundingClientRect();
+                const containerRect = containerEl.getBoundingClientRect();
+                const x = e.clientX - containerRect.left;
+                const y = e.clientY - containerRect.top;
+                
+                if (!isDragging && !isPanning) {
+                    // Normal hover (cursor line)
+                    handleZoomMouseMove(containerEl, x, y);
+                }
+            });
+            
+            // Wheel: zoom in/out centered on mouse position
+            canvasEl.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const containerRect = containerEl.getBoundingClientRect();
+                const x = e.clientX - containerRect.left;
+                const deltaY = e.deltaY;
+                applyWheelZoom(deltaY, x, containerEl);
+            });
+            
+            // Context menu: reset zoom
+            canvasEl.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                console.log('[DEBUG] Right click - calling resetZoom for chart:', chartId);
+                resetZoom(true, true, chartId);
+            });
+            
+            // Mouseleave: clear hover
+            canvasEl.addEventListener('mouseleave', () => {
+                if (!isDragging && !isPanning) {
+                    handleZoomMouseLeave();
+                }
+            });
+        }
+        
+        // Attach zoom listeners to all charts
+        attachZoomListeners(canvas, container, 'depth');
+        attachZoomListeners(motorsCanvas, motorsContainer, 'motors');
+        attachZoomListeners(derivedCanvas, derivedContainer, 'derived');
+        attachZoomListeners(stateCanvas, stateContainer, 'state');
+        attachZoomListeners(bearingPingCanvas, bearingPingContainer, 'bearingPing');
+        attachZoomListeners(orientationCanvas, orientationContainer, 'orientation');
+        attachZoomListeners(waterTempCanvas, waterTempContainer, 'waterTemp');
+        attachZoomListeners(usblAzimuthElevationCanvas, usblAzimuthElevationContainer, 'usbl-azimuth-elevation');
+        attachZoomListeners(usblDistanceCanvas, usblDistanceContainer, 'usbl-distance');
+        attachZoomListeners(usvFullAuvCanvas, usvFullAuvContainer, 'usv-full-auv');
+        attachZoomListeners(altitudeCanvas, altitudeContainer, 'altitude');
+        
+        // Filter data based on displayStartTime and displayEndTime
+        function handleZoomMouseMove(containerEl, x, y) {
+            if (isInChartAreaForCanvas(containerEl, x, y) && !isPanning) {
                 // Show cursor when hovering (works with or without zoom)
                 const currentTime = getTimeFromXForCanvas(containerEl, x);
                 if (currentTime !== null) {
@@ -5049,7 +5315,7 @@
         }
         
         function handleZoomMouseLeave() {
-            if (!waitingForSecondClick) {
+            if (!isPanning) {
                 selectedTime = null;
                 // Hide all cursor lines
                 if (cursorLine) cursorLine.style.display = 'none';

@@ -29,16 +29,19 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
 
+def get_debug_log_path():
+    """Get the path to the debug log file, creating directory if needed."""
+    debug_log_dir = Path(__file__).parent / '.cursor'
+    debug_log_dir.mkdir(exist_ok=True)
+    return debug_log_dir / 'debug.log'
+
 # Store import status in memory (in production, use Redis or similar)
 import_status = {}
 import_status_lock = threading.Lock()
 
 def get_db_connection():
     """Get database connection."""
-    db_user = os.getenv('DB_USER')
-    if not db_user or db_user == 'postgres':
-        # Use system user as default for Homebrew PostgreSQL
-        db_user = os.getenv('USER', 'user')
+    db_user = os.getenv('DB_USER', 'postgres')
     
     return psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),
@@ -957,7 +960,7 @@ def get_run_usv_position(run_id):
     """API endpoint to get USV GPS position data for the time period of an AUV run."""
     # #region agent log
     import json
-    with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+    with open(str(get_debug_log_path()), 'a') as f:
         f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:600","message":"API called","data":{"run_id":run_id},"timestamp":int(time.time()*1000)}) + '\n')
     # #endregion
     
@@ -975,7 +978,7 @@ def get_run_usv_position(run_id):
         run_info = cursor.fetchone()
         if not run_info:
             # #region agent log
-            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            with open(str(get_debug_log_path()), 'a') as f:
                 f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:612","message":"Run not found","data":{"run_id":run_id},"timestamp":int(time.time()*1000)}) + '\n')
             # #endregion
             return jsonify({'error': 'Run not found'}), 404
@@ -984,7 +987,7 @@ def get_run_usv_position(run_id):
         end_time = run_info['last_timestamp']
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"C","location":"app.py:618","message":"AUV run time range","data":{"start_time":str(start_time),"end_time":str(end_time)},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -999,7 +1002,7 @@ def get_run_usv_position(run_id):
             GROUP BY vehicle_type
         """, (start_time, end_time))
         vehicle_types = cursor.fetchall()
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"D","location":"app.py:625","message":"Vehicle types in time range","data":{"vehicle_types":[{"type":v['vehicle_type'],"count":v['count']} for v in vehicle_types]},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -1015,7 +1018,7 @@ def get_run_usv_position(run_id):
             GROUP BY dtc.data_type
         """, (start_time, end_time))
         gps_types = cursor.fetchall()
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:635","message":"GPS data types for USV in time range","data":{"gps_types":[{"type":g['data_type'],"count":g['count']} for g in gps_types]},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -1030,7 +1033,7 @@ def get_run_usv_position(run_id):
               AND dtc.data_type IN ('GPS_RAW_INT_lat', 'GPS_RAW_INT_lon')
         """)
         usv_gps_summary = cursor.fetchone()
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:645","message":"USV GPS data summary (all time)","data":{"total_count":usv_gps_summary['total_count'],"min_time":str(usv_gps_summary['min_time']) if usv_gps_summary['min_time'] else None,"max_time":str(usv_gps_summary['max_time']) if usv_gps_summary['max_time'] else None},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -1053,7 +1056,7 @@ def get_run_usv_position(run_id):
         lat_data = cursor.fetchall()
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             sample_lats = [{"time":str(l['time']),"value":l['lat_raw']} for l in lat_data[:3]] if lat_data else []
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:660","message":"Latitude query result","data":{"count":len(lat_data),"samples":sample_lats},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
@@ -1077,7 +1080,7 @@ def get_run_usv_position(run_id):
         lon_data = cursor.fetchall()
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             sample_lons = [{"time":str(l['time']),"value":l['lon_raw']} for l in lon_data[:3]] if lon_data else []
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:675","message":"Longitude query result","data":{"count":len(lon_data),"samples":sample_lons},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
@@ -1154,7 +1157,7 @@ def get_run_usv_position(run_id):
                     
                     # #region agent log - Hypothesis E: Check if coordinates are (0,0)
                     if lat_degrees == 0 and lon_degrees == 0:
-                        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                        with open(str(get_debug_log_path()), 'a') as f:
                             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"E","location":"app.py:705","message":"Found (0,0) coordinate","data":{"time":lat_time.isoformat(),"lat_raw":lat_raw,"lon_raw":lon_raw},"timestamp":int(time.time()*1000)}) + '\n')
                     # #endregion
                     
@@ -1165,7 +1168,7 @@ def get_run_usv_position(run_id):
                     })
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"A","location":"app.py:715","message":"Final result","data":{"result_count":len(result),"sample_results":result[:3] if result else []},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -1177,7 +1180,7 @@ def get_run_usv_position(run_id):
         import traceback
         error_msg = str(e)
         error_traceback = traceback.format_exc()
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"ERROR","location":"app.py:usv_position","message":"Exception in usv_position","data":{"error":error_msg,"traceback":error_traceback},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         import traceback
@@ -1254,11 +1257,21 @@ def get_runs():
                 depth_result = cursor.fetchone()
                 
                 if depth_result and depth_result['actual_start'] and depth_result['actual_end']:
-                    # Use actual mission times from depth data
-                    run_dict['first_timestamp'] = depth_result['actual_start'].isoformat()
-                    run_dict['last_timestamp'] = depth_result['actual_end'].isoformat()
+                    # Use actual mission times from depth data, but ensure they're within file timestamps
+                    file_start = run_dict['first_timestamp']
+                    file_end = run_dict['last_timestamp']
+                    depth_start = depth_result['actual_start']
+                    depth_end = depth_result['actual_end']
+                    
+                    # Use depth timestamps, but extend to file timestamps if depth range is shorter
+                    # This ensures the full run is visible even if depth data doesn't cover the entire file
+                    final_start = min(file_start, depth_start) if file_start else depth_start
+                    final_end = max(file_end, depth_end) if file_end else depth_end
+                    
+                    run_dict['first_timestamp'] = final_start.isoformat()
+                    run_dict['last_timestamp'] = final_end.isoformat()
                     # Recalculate duration
-                    duration = (depth_result['actual_end'] - depth_result['actual_start']).total_seconds()
+                    duration = (final_end - final_start).total_seconds()
                     run_dict['duration_seconds'] = duration
                 else:
                     # Fallback to file timestamps if no depth data
@@ -1989,9 +2002,12 @@ def process_import_files(import_id, temp_dir):
                 else:
                     files_skipped += 1
             except Exception as e:
+                import traceback
+                error_traceback = traceback.format_exc()
                 error_msg = f"Error importing {nav_file.name}: {str(e)}"
                 print(error_msg)
-                errors.append(error_msg)
+                print(error_traceback)
+                errors.append(f"{nav_file.name}: {str(e)}")
             finally:
                 files_processed += 1
                 with import_status_lock:
@@ -2018,9 +2034,12 @@ def process_import_files(import_id, temp_dir):
                 else:
                     print(f"Skipping settings file {settings_file.name} (USV)")
             except Exception as e:
+                import traceback
+                error_traceback = traceback.format_exc()
                 error_msg = f"Error importing {settings_file.name}: {str(e)}"
                 print(error_msg)
-                errors.append(error_msg)
+                print(error_traceback)
+                errors.append(f"{settings_file.name}: {str(e)}")
             finally:
                 files_processed += 1
                 with import_status_lock:
@@ -2072,9 +2091,12 @@ def process_import_files(import_id, temp_dir):
                 else:
                     files_skipped += 1
             except Exception as e:
+                import traceback
+                error_traceback = traceback.format_exc()
                 error_msg = f"Error importing {usbl_file.name}: {str(e)}"
                 print(error_msg)
-                errors.append(error_msg)
+                print(error_traceback)
+                errors.append(f"{usbl_file.name}: {str(e)}")
             finally:
                 files_processed += 1
                 with import_status_lock:
@@ -2128,9 +2150,12 @@ def process_import_files(import_id, temp_dir):
                 else:
                     files_skipped += 1
             except Exception as e:
+                import traceback
+                error_traceback = traceback.format_exc()
                 error_msg = f"Error importing {full_file.name}: {str(e)}"
                 print(error_msg)
-                errors.append(error_msg)
+                print(error_traceback)
+                errors.append(f"{full_file.name}: {str(e)}")
             finally:
                 files_processed += 1
                 with import_status_lock:
@@ -2165,7 +2190,7 @@ def process_import_files(import_id, temp_dir):
                 'files_imported': files_imported,
                 'files_skipped': files_skipped,
                 'message': message,
-                'errors': errors[:5]
+                'errors': errors[:10]  # Show up to 10 errors instead of 5
             })
             
     except Exception as e:
@@ -2423,7 +2448,7 @@ def get_run_usv_full_auv_data(run_id):
         auv_vehicle_id = run_info['vehicle_id']  # e.g., 'AUV005'
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:1562","message":"API called","data":{"run_id":run_id,"start_time":str(start_time),"end_time":str(end_time),"auv_vehicle_id":auv_vehicle_id},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -2450,7 +2475,7 @@ def get_run_usv_full_auv_data(run_id):
         data = cursor.fetchall()
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:1585","message":"Query executed","data":{"row_count":len(data)},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -2480,7 +2505,7 @@ def get_run_usv_full_auv_data(run_id):
                 result['state'].append(entry)
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"api","hypothesisId":"B","location":"app.py:1615","message":"Returning result","data":{"distance_count":len(result['distance']),"bearing_count":len(result['bearing']),"elevation_count":len(result['elevation']),"state_count":len(result['state'])},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -2667,7 +2692,7 @@ def get_settings():
     """API endpoint to get settings organized by runs for comparison."""
     # #region agent log
     import json
-    with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+    with open(str(get_debug_log_path()), 'a') as f:
         f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1544","message":"API /api/settings called","data":{"vehicle_type":request.args.get('vehicle_type', 'AUV')},"timestamp":int(time.time()*1000)}) + '\n')
     # #endregion
     
@@ -2678,7 +2703,7 @@ def get_settings():
         vehicle_type = request.args.get('vehicle_type', 'AUV')
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1552","message":"Checking settings_files in DB","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -2692,12 +2717,12 @@ def get_settings():
         settings_count = cursor.fetchone()
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1562","message":"Settings files count","data":{"total":settings_count['count'],"completed":settings_count['completed_count']},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
         # Debug: Log all settings files found
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1565","message":"All settings files query","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
         
         # Get all settings files for this vehicle type
@@ -2722,11 +2747,11 @@ def get_settings():
                 all_settings_files.append(sf)
             else:
                 # Log files that are not completed
-                with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+                with open(str(get_debug_log_path()), 'a') as f:
                     f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1850","message":"Settings file not completed","data":{"filename":sf['settings_filename'],"status":sf['import_status']},"timestamp":int(time.time()*1000)}) + '\n')
         
         # Log how many completed files we found
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"A","location":"app.py:1855","message":"Completed settings files","data":{"count":len(all_settings_files),"files":[{"id":sf['settings_file_id'],"filename":sf['settings_filename']} for sf in all_settings_files]},"timestamp":int(time.time()*1000)}) + '\n')
         
         # Extract timestamp from filename in Python (more reliable than SQL)
@@ -2811,7 +2836,7 @@ def get_settings():
                 run['associated_settings_file_id'] = best_match
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1590","message":"Runs query result","data":{"runs_found":len(runs_data),"runs_with_settings":sum(1 for r in runs_data if r.get('associated_settings_file_id'))},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -2824,7 +2849,7 @@ def get_settings():
             LIMIT 5
         """, (vehicle_type,))
         sample_settings = cursor.fetchall()
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             settings_list = []
             for s in sample_settings:
                 settings_list.append({
@@ -2845,13 +2870,13 @@ def get_settings():
                     "first_timestamp": r['first_timestamp'].isoformat() if r['first_timestamp'] else None,
                     "associated_settings_file_id": r.get('associated_settings_file_id')
                 })
-            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            with open(str(get_debug_log_path()), 'a') as f:
                 f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1625","message":"Sample runs","data":{"runs":sample_runs},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
         if not all_settings_files:
             # #region agent log
-            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            with open(str(get_debug_log_path()), 'a') as f:
                 f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1595","message":"No settings files found","data":{"vehicle_type":vehicle_type},"timestamp":int(time.time()*1000)}) + '\n')
             # #endregion
             return jsonify({
@@ -2880,7 +2905,7 @@ def get_settings():
             settings_file_id = sf['settings_file_id']
             
             # #region agent log
-            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            with open(str(get_debug_log_path()), 'a') as f:
                 f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"B","location":"app.py:1615","message":"Processing settings file","data":{"settings_file_id":settings_file_id,"filename":sf['settings_filename']},"timestamp":int(time.time()*1000)}) + '\n')
             # #endregion
             
@@ -2895,7 +2920,7 @@ def get_settings():
             settings = cursor.fetchall()
             
             # #region agent log
-            with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+            with open(str(get_debug_log_path()), 'a') as f:
                 f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1628","message":"Settings loaded for settings file","data":{"settings_file_id":settings_file_id,"settings_count":len(settings)},"timestamp":int(time.time()*1000)}) + '\n')
             # #endregion
             
@@ -2970,7 +2995,7 @@ def get_settings():
             runs_list.append(run_dict)
         
         # #region agent log
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"C","location":"app.py:1645","message":"API response prepared","data":{"runs_count":len(runs_list),"settings_count":len(all_setting_names)},"timestamp":int(time.time()*1000)}) + '\n')
         # #endregion
         
@@ -2986,7 +3011,7 @@ def get_settings():
         import traceback
         error_msg = str(e)
         error_traceback = traceback.format_exc()
-        with open('/Users/yannick/Cosma/deepLog/.cursor/debug.log', 'a') as f:
+        with open(str(get_debug_log_path()), 'a') as f:
             f.write(json.dumps({"sessionId":"debug-session","runId":"initial","hypothesisId":"ERROR","location":"app.py:get_settings","message":"Exception in get_settings","data":{"error":error_msg,"traceback":error_traceback},"timestamp":int(time.time()*1000)}) + '\n')
         return jsonify({'error': f'Erreur lors de la récupération des settings: {error_msg}'}), 500
         
@@ -3441,13 +3466,19 @@ def decode_usbl_file(log_file_id):
         """, (log_file_id,))
         conn.commit()
         
-        # Import the decoder functions
-        from antenna_driver_analysis.kogger_usbl_decoder import (
-            decode_usbl_message_from_csv,
-            parse_bytes_from_string,
-            reassemble_received_messages,
-            parse_message
-        )
+        # Import the decoder functions (optional - only needed for USBL decoding)
+        try:
+            from antenna_driver_analysis.kogger_usbl_decoder import (
+                decode_usbl_message_from_csv,
+                parse_bytes_from_string,
+                reassemble_received_messages,
+                parse_message
+            )
+        except ImportError:
+            return jsonify({
+                'status': 'error',
+                'message': 'antenna_driver_analysis module not installed. Install it to enable USBL file imports.'
+            }), 500
         from psycopg2.extras import execute_values
         
         # Get vehicle info from log_file
