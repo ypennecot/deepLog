@@ -7,6 +7,7 @@ from flask import Flask, render_template, request, jsonify, Response, stream_wit
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 import os
+import platform
 from dotenv import load_dotenv
 from pathlib import Path
 import tempfile
@@ -41,7 +42,15 @@ import_status_lock = threading.Lock()
 
 def get_db_connection():
     """Get database connection."""
-    db_user = os.getenv('DB_USER', 'postgres')
+    db_user = os.getenv('DB_USER')
+    # Platform-specific default: Mac (Homebrew) uses system user, PC uses 'postgres'
+    # If DB_USER is not set, or if it's set to 'postgres' on Mac, use platform-specific default
+    if not db_user or (db_user == 'postgres' and platform.system() == 'Darwin'):
+        system_name = platform.system()
+        if system_name == 'Darwin':  # macOS
+            db_user = os.getenv('USER', 'user')
+        else:  # Windows, Linux, etc.
+            db_user = 'postgres'
     
     return psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),

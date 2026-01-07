@@ -7,13 +7,22 @@ Creates all tables according to the optimized data model.
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import os
+import platform
 from dotenv import load_dotenv
 
 load_dotenv()
 
 def get_db_connection():
     """Get database connection from environment variables."""
-    db_user = os.getenv('DB_USER', 'postgres')
+    db_user = os.getenv('DB_USER')
+    # Platform-specific default: Mac (Homebrew) uses system user, PC uses 'postgres'
+    # If DB_USER is not set, or if it's set to 'postgres' on Mac, use platform-specific default
+    if not db_user or (db_user == 'postgres' and platform.system() == 'Darwin'):
+        system_name = platform.system()
+        if system_name == 'Darwin':  # macOS
+            db_user = os.getenv('USER', 'user')
+        else:  # Windows, Linux, etc.
+            db_user = 'postgres'
     
     return psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),
@@ -25,7 +34,15 @@ def get_db_connection():
 
 def create_database():
     """Create the database if it doesn't exist."""
-    db_user = os.getenv('DB_USER', 'postgres')
+    db_user = os.getenv('DB_USER')
+    # Platform-specific default: Mac (Homebrew) uses system user, PC uses 'postgres'
+    # If DB_USER is not set, or if it's set to 'postgres' on Mac, use platform-specific default
+    if not db_user or (db_user == 'postgres' and platform.system() == 'Darwin'):
+        system_name = platform.system()
+        if system_name == 'Darwin':  # macOS
+            db_user = os.getenv('USER', 'user')
+        else:  # Windows, Linux, etc.
+            db_user = 'postgres'
     
     conn = psycopg2.connect(
         host=os.getenv('DB_HOST', 'localhost'),
